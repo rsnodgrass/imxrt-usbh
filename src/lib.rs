@@ -1,14 +1,58 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+#![no_std]
+#![deny(unsafe_op_in_unsafe_fn)]
+#![warn(missing_docs)]
+
+//! USB Host driver for i.MX RT1062 (Teensy 4.x)
+//! 
+//! This driver provides USB host functionality for the i.MX RT1062 microcontroller,
+//! specifically targeting Teensy 4.0 and 4.1 boards.
+
+#[cfg(feature = "defmt")]
+use defmt as _;
+
+pub mod ehci;
+pub mod phy;
+pub mod dma;
+pub mod error;
+pub mod vbus;
+pub mod transfer;
+
+#[cfg(feature = "rtic-support")]
+pub mod rtic;
+
+#[cfg(feature = "class-hid")]
+pub mod hid;
+
+#[cfg(feature = "class-msc")]
+pub mod msc;
+
+#[cfg(feature = "hub")]
+pub mod hub;
+
+pub use error::{UsbError, Result};
+
+use core::sync::atomic::{AtomicBool, Ordering};
+
+/// Global flag for USB host initialization state
+static USB_HOST_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// USB Host controller instance
+pub struct UsbHost {
+    _private: (),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+impl UsbHost {
+    /// Initialize the USB host controller
+    /// 
+    /// # Safety
+    /// 
+    /// This function must only be called once during system initialization.
+    /// Caller must ensure exclusive access to USB peripherals.
+    pub unsafe fn new() -> Result<Self> {
+        if USB_HOST_INITIALIZED.swap(true, Ordering::Acquire) {
+            return Err(UsbError::AlreadyInitialized);
+        }
+        
+        Ok(Self { _private: () })
     }
 }

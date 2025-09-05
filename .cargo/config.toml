@@ -1,0 +1,27 @@
+[target.thumbv7em-none-eabihf]
+# Use LLD linker for faster linking on embedded targets
+linker = "rust-lld"
+
+[build]
+# Set default target for this embedded project
+target = "thumbv7em-none-eabihf"
+
+# Use LLD for all targets to improve compile times (requires: brew install lld)
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "linker=lld"]
+
+[target.aarch64-apple-darwin] 
+rustflags = ["-C", "linker=lld"]
+
+# Enable optimizations for faster dev builds
+[profile.dev]
+opt-level = 1
+debug = true
+split-debuginfo = "unpacked"
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Enable link-time optimization
+debug = true        # Keep debug info for profiling
+codegen-units = 1   # Better optimization
+panic = "abort"     # Smaller binary size

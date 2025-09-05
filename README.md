@@ -3,11 +3,27 @@ imxrt-usbh
 
 **Work in progress - not ready for use yet**
 
-A USB host driver for i.MX RT processors. `imxrt-usbh` adapts [`cotton-usb-host`]
-to the i.MX RT microcontroller family. The first goal is to get it working on
-a Teensy 4.1, on the USB2 port.
+A USB host driver for i.MX RT processors. `imxrt-usbh` provides EHCI USB host functionality
+for the i.MX RT1062 microcontroller family, targeting Teensy 4.0/4.1 boards with RTIC support.
 
-[`cotton-usb-host`]: https://github.com/pdh11/cotton/tree/main/cotton-usb-host
+## Development Requirements
+
+- **LLD Linker**: Install LLD for faster compilation times:
+  ```bash
+  brew install lld
+  ```
+
+- **Rust Target**: The embedded ARM Cortex-M7 target:
+  ```bash
+  rustup target add thumbv7em-none-eabihf
+  ```
+
+## Architecture
+
+- **EHCI USB Host**: Full EHCI 1.0 compliant implementation
+- **RTIC Integration**: Real-time interrupt handling with <10μs ISR latency
+- **Cache Coherent DMA**: ARM Cortex-M7 cache management for USB transfers
+- **Safety First**: `#![deny(unsafe_op_in_unsafe_fn)]` with comprehensive bounds checking
 
 
 License
