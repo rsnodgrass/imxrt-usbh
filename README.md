@@ -92,25 +92,25 @@ let int_transfer_id = interrupt_manager.submit(
 )?;
 
 // Device class handling happens in separate crates:
-// - imxrt-usbh-midi for MIDI keyboards
+// - imxrt-usbh-midi for MIDI keyboards  
 // - imxrt-usbh-hid for mice/keyboards
 // - imxrt-usbh-msc for mass storage
 ```
 
-## Example Code
+## Building Class Driver Crates
 
-- `examples/midi_keyboard.rs`: RTIC application showing USB device enumeration
+The examples demonstrate how to build separate class driver crates like `imxrt-usbh-hid`, `imxrt-usbh-msc`, and `imxrt-usbh-cdc`. Each depends on this core library while providing high-level, type-safe APIs for specific device classes.
 
-## Future Crate Ideas
+## Examples
 
-Example device class drivers that may be built on `imxrt-usbh`:
+See the [`examples/`](examples/) directory for comprehensive examples and documentation:
 
-- **imxrt-usbh-midi**: MIDI keyboard and controller support
-- **imxrt-usbh-hid**: Human Interface Devices (keyboards, mice)
-- **imxrt-usbh-msc**: Mass Storage Class (USB drives)
-- **imxrt-usbh-cdc**: Communications Device Class (virtual serial ports)
+- **Device enumeration**: Complete USB 2.0 enumeration sequence
+- **HID keyboards**: Reference implementation for HID class drivers  
+- **Mass storage**: SCSI/BOT protocol implementation for USB drives
+- **RTIC integration**: Real-time USB handling patterns
 
-Each class driver provides high-level APIs specific to that device type while building on the core enumeration and transfer functionality provided here.
+For detailed documentation and usage examples, see [examples/README.md](examples/README.md).
 
 ## References
 

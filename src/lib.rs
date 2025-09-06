@@ -24,6 +24,9 @@ pub mod enumeration;
 #[cfg(feature = "rtic-support")]
 pub mod rtic;
 
+#[cfg(test)]
+mod lib_test;
+
 #[cfg(feature = "hub")]
 pub mod hub;
 
