@@ -172,7 +172,7 @@ impl QueueTD {
         
         if (token & token::STATUS_HALTED) != 0 {
             if (token & token::STATUS_BABBLE) != 0 {
-                return Some(UsbError::Babble);
+                return Some(UsbError::TransactionError);
             }
             if (token & token::STATUS_DATA_BUFFER_ERROR) != 0 {
                 return Some(UsbError::BufferOverflow);
@@ -181,7 +181,7 @@ impl QueueTD {
                 return Some(UsbError::TransactionError);
             }
             if (token & token::STATUS_MISSED_MICROFRAME) != 0 {
-                return Some(UsbError::MissedMicroframe);
+                return Some(UsbError::TransactionError);
             }
             return Some(UsbError::Stall);
         }

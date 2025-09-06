@@ -4,6 +4,9 @@
 
 use crate::error::UsbError;
 
+pub mod control;
+pub mod simple_control;
+
 /// USB transfer types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

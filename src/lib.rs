@@ -16,6 +16,10 @@ pub mod dma;
 pub mod error;
 pub mod vbus;
 pub mod transfer;
+pub mod perf;
+pub mod recovery;
+pub mod safety;
+pub mod enumeration;
 
 #[cfg(feature = "rtic-support")]
 pub mod rtic;

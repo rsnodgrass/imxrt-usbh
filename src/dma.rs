@@ -3,6 +3,16 @@
 //! Provides cache-coherent DMA buffers for the ARM Cortex-M7 with D-cache.
 //! Based on i.MX RT1060 RM Section 3.3.3 and ARM Cortex-M7 TRM.
 
+pub mod pools;
+pub mod descriptor;
+pub mod buffer;
+pub mod memory;
+
+pub use pools::{UsbDescriptorPool, DataBufferPool, BufferHandle, PoolStats};
+pub use descriptor::{DescriptorAllocator, QhHandle, QtdHandle, DescriptorState};
+pub use buffer::{BufferPool, BufferHandle as DmaBufferHandle, BufferSize};
+pub use memory::{UsbMemoryPool, DmaBuffer as MemoryDmaBuffer};
+
 use core::mem::size_of;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -52,8 +62,11 @@ pub unsafe fn init_dma_region() -> Result<()> {
     }
     
     // Get DMA region address
-    let region_addr = unsafe { &DMA_REGION as *const _ as usize };
+    let region_addr = unsafe { &raw const DMA_REGION as usize };
     let region_size = size_of::<DmaRegion>();
+    
+    // Validate region bounds
+    crate::safety::BoundsChecker::validate_alignment(region_addr, DMA_ALIGNMENT)?;
     
     // Configure MPU for non-cacheable DMA region
     unsafe {
@@ -67,7 +80,7 @@ pub unsafe fn init_dma_region() -> Result<()> {
 /// 
 /// Sets up MPU region 7 as Device memory for DMA buffers.
 /// Reference: ARM Cortex-M7 Generic User Guide, Section 2.3
-unsafe fn configure_mpu_dma_region(addr: usize, size: usize) -> Result<()> {
+unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
     use cortex_m::peripheral::MPU;
     
     const MPU_CTRL_ENABLE: u32 = 0x01;
@@ -153,67 +166,86 @@ impl DmaBuffer {
 /// 
 /// Use these when DMA buffers are in cacheable memory regions.
 pub mod cache_ops {
+    use cortex_m::asm::{dsb, isb};
+    
     /// Data cache line size for Cortex-M7 (32 bytes)
     const DCACHE_LINE_SIZE: usize = 32;
+    
+    /// SCB cache maintenance registers for Cortex-M7
+    const SCB_DCCMVAC: *mut u32 = 0xE000_EF68 as *mut u32; // Clean by MVA to PoC
+    const SCB_DCIMVAC: *mut u32 = 0xE000_EF5C as *mut u32; // Invalidate by MVA to PoC
+    const SCB_DCCIMVAC: *mut u32 = 0xE000_EF70 as *mut u32; // Clean & Invalidate by MVA to PoC
     
     /// Clean (write-back) data cache by address range
     /// 
     /// Use before DMA read operations to ensure data is in memory.
     pub fn clean_dcache(addr: usize, size: usize) {
-        cortex_m::asm::dsb(); // Ensure all previous writes complete
-        
-        let start = addr & !(DCACHE_LINE_SIZE - 1);
-        let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
-        
-        for _line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
-            unsafe {
-                // Placeholder: Cache maintenance operations would go here
-                // Real implementation needs CMSIS or direct register access
-                cortex_m::asm::nop();
+        unsafe {
+            dsb(); // Ensure all previous writes complete
+            
+            let start = addr & !(DCACHE_LINE_SIZE - 1);
+            let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
+            
+            for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
+                // Clean data cache line by address
+                core::ptr::write_volatile(SCB_DCCMVAC, line_addr as u32);
             }
+            
+            dsb(); // Ensure cache operations complete
+            isb(); // Ensure instruction synchronization
         }
-        
-        cortex_m::asm::dsb(); // Ensure cache operations complete
     }
     
     /// Invalidate data cache by address range
     /// 
     /// Use after DMA write operations to ensure CPU sees new data.
     pub fn invalidate_dcache(addr: usize, size: usize) {
-        cortex_m::asm::dsb(); // Ensure all previous operations complete
-        
-        let start = addr & !(DCACHE_LINE_SIZE - 1);
-        let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
-        
-        for _line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
-            unsafe {
-                // Placeholder: Cache maintenance operations would go here
-                // Real implementation needs CMSIS or direct register access
-                cortex_m::asm::nop();
+        unsafe {
+            dsb(); // Ensure all previous operations complete
+            
+            let start = addr & !(DCACHE_LINE_SIZE - 1);
+            let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
+            
+            for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
+                // Invalidate data cache line by address
+                core::ptr::write_volatile(SCB_DCIMVAC, line_addr as u32);
             }
+            
+            dsb(); // Ensure cache operations complete
+            isb(); // Ensure instruction synchronization
         }
-        
-        cortex_m::asm::dsb(); // Ensure cache operations complete
     }
     
     /// Clean and invalidate data cache by address range
     /// 
     /// Use for bidirectional DMA operations.
     pub fn clean_invalidate_dcache(addr: usize, size: usize) {
-        cortex_m::asm::dsb(); // Ensure all previous operations complete
-        
-        let start = addr & !(DCACHE_LINE_SIZE - 1);
-        let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
-        
-        for _line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
-            unsafe {
-                // Placeholder: Cache maintenance operations would go here
-                // Real implementation needs CMSIS or direct register access
-                cortex_m::asm::nop();
+        unsafe {
+            dsb(); // Ensure all previous operations complete
+            
+            let start = addr & !(DCACHE_LINE_SIZE - 1);
+            let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
+            
+            for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
+                // Clean and invalidate data cache line by address
+                core::ptr::write_volatile(SCB_DCCIMVAC, line_addr as u32);
             }
+            
+            dsb(); // Ensure cache operations complete
+            isb(); // Ensure instruction synchronization
         }
-        
-        cortex_m::asm::dsb(); // Ensure cache operations complete
+    }
+    
+    /// Prepare DMA buffer for device access (CPU -> Device)
+    #[inline]
+    pub fn prepare_for_dma_write(buffer: &[u8]) {
+        clean_dcache(buffer.as_ptr() as usize, buffer.len());
+    }
+    
+    /// Prepare DMA buffer for CPU access (Device -> CPU)
+    #[inline]
+    pub fn prepare_for_dma_read(buffer: &mut [u8]) {
+        invalidate_dcache(buffer.as_ptr() as usize, buffer.len());
     }
 }
 
@@ -243,10 +275,13 @@ impl DmaBufferPool {
         for (i, allocated) in self.allocated.iter().enumerate() {
             if !allocated.swap(true, Ordering::Acquire) {
                 // Buffer was free, now allocated
-                let ptr = unsafe {
-                    let addr = &DMA_REGION.data_buffers[i][0] as *const u8 as *mut u8;
-                    NonNull::new_unchecked(addr)
-                };
+                let addr = unsafe { &DMA_REGION.data_buffers[i][0] as *const u8 as *mut u8 };
+                
+                // Validate buffer bounds
+                crate::safety::BoundsChecker::validate_buffer(addr, size)?;
+                crate::safety::BoundsChecker::validate_dma_buffer(addr as usize, size)?;
+                
+                let ptr = unsafe { NonNull::new_unchecked(addr) };
                 
                 return Ok(DmaBuffer {
                     ptr,

@@ -19,15 +19,72 @@
 pub mod register;
 pub mod qtd;
 pub mod qh;
+pub mod controller;
 
 pub use qtd::QueueTD;
 pub use qh::QueueHead;
 pub use register::{Register, RegisterTimeout};
+pub use controller::{EhciController, EhciControllerBuilder, Uninitialized, Initialized, Running};
 
+// Re-export important types for easier use
+pub use qtd::token;
+pub use qh::{endpoint, capabilities};
+
+use crate::error::{Result, UsbError};
 use bitflags::bitflags;
 
-// Base address for USB1: 0x402E_0000
-// Base address for USB2: 0x402E_0400
+/// Type-safe port identifier
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PortId(u8);
+
+impl PortId {
+    /// Create a new port ID, validating range
+    pub const fn new(port: u8) -> Result<Self> {
+        if port >= 8 {
+            Err(UsbError::InvalidParameter)
+        } else {
+            Ok(Self(port))
+        }
+    }
+    
+    /// Get the port index as usize for array access
+    #[inline(always)]
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+    
+    /// Get the raw port number
+    #[inline(always)]
+    pub const fn value(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<u8> for PortId {
+    fn from(port: u8) -> Self {
+        Self(port.min(7)) // Clamp to valid range
+    }
+}
+
+impl TryFrom<usize> for PortId {
+    type Error = UsbError;
+    
+    fn try_from(port: usize) -> Result<Self> {
+        if port >= 8 {
+            Err(UsbError::InvalidParameter)
+        } else {
+            Ok(Self(port as u8))
+        }
+    }
+}
+
+/// Compile-time assertion helper for const generic bounds checking
+pub struct Assert<const COND: bool>;
+
+/// Trait to enable compile-time assertions
+pub trait IsTrue {}
+
+impl IsTrue for Assert<true> {}
 
 /// Base address for USB1 EHCI controller on i.MX RT1062
 pub const USB1_BASE: usize = 0x402E_0000;
@@ -35,32 +92,6 @@ pub const USB1_BASE: usize = 0x402E_0000;
 /// Base address for USB2 EHCI controller on i.MX RT1062
 pub const USB2_BASE: usize = 0x402E_0400;
 
-/// Type-safe port identifier with bounds checking
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PortId {
-    id: u8,
-}
-
-impl PortId {
-    /// Create a new PortId with bounds checking
-    pub fn new(port: u8, max_ports: u8) -> Option<Self> {
-        if port < max_ports {
-            Some(Self { id: port })
-        } else {
-            None
-        }
-    }
-    
-    /// Get the raw port number (zero-based)
-    pub fn id(self) -> u8 {
-        self.id
-    }
-    
-    /// Get the port number as usize for array indexing
-    pub fn as_index(self) -> usize {
-        self.id as usize
-    }
-}
 
 /// Port speed detection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
