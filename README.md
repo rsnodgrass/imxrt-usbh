@@ -23,13 +23,11 @@ A production-ready, simplified USB host driver for i.MX RT processors with embed
 
 ## Design Choices
 
-* prefer simplification over feature completeness
 - **Real-time friendly**: Predictable timing, no locks in hot paths
 - **Stack overflow protection**: Runtime monitoring with canary patterns
 - **Hardware timing compliance**: Proper PHY initialization per i.MX RT reference manual
 - **Cache coherency**: Actual Cortex-M7 cache operations, not placeholders
 - **Error recovery**: Actionable errors with automatic retry logic
-
 
 ## Quick Start
 
@@ -99,30 +97,11 @@ let int_transfer_id = interrupt_manager.submit(
 // - imxrt-usbh-msc for mass storage
 ```
 
-
-## Current Status
-
-- ✅ **Core enumeration**: Complete USB device enumeration
-- ✅ **Memory management**: Simplified and production-ready
-- ✅ **Error handling**: Actionable recovery strategies
-- ✅ **Safety monitoring**: Stack overflow and bounds checking
-- ✅ **RTIC integration**: Real-time interrupt handling
-- ✅ **Cache coherency**: Proper Cortex-M7 cache operations
-- ✅ **Device detection**: Identifies device classes (Audio, HID, MSC, etc.)
-- ✅ **Bulk transfer implementation**: IN/OUT endpoint data transfer  
-- ✅ **Interrupt transfer implementation**: Periodic endpoint data transfer
-- ✅ **Isochronous transfer implementation**: Real-time streaming data transfer
-- 🔄 **Hub support**: Multiple device enumeration
-
-
-
-
-
-## Examples
+## Example Code
 
 - `examples/midi_keyboard.rs`: RTIC application showing USB device enumeration
 
-## Related Crates
+## Future Crate Ideas
 
 Example device class drivers that may be built on `imxrt-usbh`:
 
