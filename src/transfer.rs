@@ -6,6 +6,9 @@ use crate::error::UsbError;
 
 pub mod control;
 pub mod simple_control;
+pub mod bulk;
+
+pub use bulk::{BulkTransfer, BulkTransferManager, BulkState, bulk_endpoint};
 
 /// USB transfer types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

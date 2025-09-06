@@ -28,6 +28,7 @@ pub mod rtic;
 pub mod hub;
 
 pub use error::{UsbError, Result};
+pub use transfer::{BulkTransfer, BulkTransferManager, Direction, TransferType};
 
 use core::sync::atomic::{AtomicBool, Ordering};
 

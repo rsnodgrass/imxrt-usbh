@@ -49,6 +49,7 @@ use imxrt_usbh::{
     enumeration::DeviceEnumerator,
     dma::memory::USB_MEMORY_POOL,
     ehci::controller::EhciController,
+    BulkTransferManager, Direction,
 };
 
 // Initialize USB host
@@ -59,6 +60,24 @@ controller.init()?;
 let mut memory_pool = unsafe { &mut USB_MEMORY_POOL };
 let mut enumerator = DeviceEnumerator::new(&mut controller, &mut memory_pool);
 let device = enumerator.enumerate_device()?;
+
+// Perform bulk data transfer
+let mut bulk_manager = BulkTransferManager::new();
+let mut buffer_pool = memory_pool.dma_buffer_pool();
+let data_buffer = buffer_pool.alloc(512)?;
+
+// Submit bulk IN transfer
+let transfer_id = bulk_manager.submit(
+    Direction::In,        // Read from device
+    device.address,       // Device address
+    0x81,                 // Bulk IN endpoint
+    512,                  // Max packet size
+    data_buffer,          // DMA buffer
+    1000,                 // Timeout (1 second)
+)?;
+
+// Start the transfer
+bulk_manager.start_transfer(transfer_id, &mut allocator)?;
 
 // Device class handling happens in separate crates:
 // - imxrt-usbh-midi for MIDI keyboards
@@ -76,8 +95,8 @@ let device = enumerator.enumerate_device()?;
 - ✅ **RTIC integration**: Real-time interrupt handling
 - ✅ **Cache coherency**: Proper Cortex-M7 cache operations
 - ✅ **Device detection**: Identifies device classes (Audio, HID, MSC, etc.)
+- ✅ **Bulk transfer implementation**: IN/OUT endpoint data transfer
 - 🔄 **Hub support**: Multiple device enumeration
-- 🔄 **Bulk transfer implementation**: IN/OUT endpoint data transfer
 
 
 
@@ -89,7 +108,7 @@ let device = enumerator.enumerate_device()?;
 
 ## Related Crates
 
-Device class drivers built on `imxrt-usbh`:
+Example device class drivers that may be built on `imxrt-usbh`:
 
 - **imxrt-usbh-midi**: MIDI keyboard and controller support
 - **imxrt-usbh-hid**: Human Interface Devices (keyboards, mice)
@@ -98,6 +117,14 @@ Device class drivers built on `imxrt-usbh`:
 
 Each class driver provides high-level APIs specific to that device type while building on the core enumeration and transfer functionality provided here.
 
+## References
+
+* [i.MX RT1060 Reference Manual Rev. 3 (IMXRT1060RM)](https://www.pjrc.com/teensy/IMXRT1060RM_rev3.pdf)
+* [AN12042: "Using the i.MX RT L1 Cache"](https://www.nxp.com/docs/en/application-note/AN12042.pdf)
+* [EHCI Specification 1.0](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/ehci-specification-for-usb.pdf)
+* [USB 2.0 Specification](http://www.poweredusb.org/pdf/usb20.pdf)
+* [ARM Cortex-M7 Technical Reference Manual](https://developer.arm.com/documentation/ddi0489/f/introduction/documentation)
+* [cotton-usb-host architecture](https://docs.rs/cotton-usb-host/latest/cotton_usb_host/) (adaptation reference)
 
 ## License
 
