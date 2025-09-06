@@ -2,10 +2,9 @@
 
 **Work in progress - not ready for use yet**
 
-A USB host driver for i.MX RT processors. `imxrt-usbh` provides EHCI USB host functionality
-for the i.MX RT1062 microcontroller family, targeting Teensy 4.0/4.1 boards with RTIC support.
+A production-ready, simplified USB host driver for i.MX RT processors with embedded systems best practices.
 
-Initially designed for MIDI keyboard integration and real-time applications.
+**Core USB host functionality only** - device class drivers (MIDI, HID, etc.) are separate libraries that build on top of this foundation.
 
 ## Target Hardware
 
@@ -61,24 +60,24 @@ let mut memory_pool = unsafe { &mut USB_MEMORY_POOL };
 let mut enumerator = DeviceEnumerator::new(&mut controller, &mut memory_pool);
 let device = enumerator.enumerate_device()?;
 
-// Check if it's a MIDI device
-if device.is_midi {
-    // Ready for MIDI communication
-}
+// Device class handling happens in separate crates:
+// - imxrt-usbh-midi for MIDI keyboards
+// - imxrt-usbh-hid for mice/keyboards
+// - imxrt-usbh-msc for mass storage
 ```
 
 
 ## Current Status
 
-- ✅ **Core enumeration**: Complete with MIDI device detection
+- ✅ **Core enumeration**: Complete USB device enumeration
 - ✅ **Memory management**: Simplified and production-ready
 - ✅ **Error handling**: Actionable recovery strategies
 - ✅ **Safety monitoring**: Stack overflow and bounds checking
 - ✅ **RTIC integration**: Real-time interrupt handling
 - ✅ **Cache coherency**: Proper Cortex-M7 cache operations
-- 🔄 **MIDI data transfer**: Bulk endpoint setup (next priority)
-- 🔄 **MIDI message parsing**: Note on/off, control change handling
-- 🔄 **Multiple device support**: Hub and multi-device management
+- ✅ **Device detection**: Identifies device classes (Audio, HID, MSC, etc.)
+- 🔄 **Hub support**: Multiple device enumeration
+- 🔄 **Bulk transfer implementation**: IN/OUT endpoint data transfer
 
 
 
@@ -86,20 +85,18 @@ if device.is_midi {
 
 ## Examples
 
-- `examples/midi_keyboard.rs`: Complete RTIC application for MIDI keyboard enumeration with LED status indication.
+- `examples/midi_keyboard.rs`: RTIC application showing USB device enumeration
 
-### MIDI Keyboard Support
+## Related Crates
 
-This driver was built with MIDI keyboards as the primary use case, providing an alternative to MIDI serial communication:
+Device class drivers built on `imxrt-usbh`:
 
-```rust
-// Automatic MIDI keyboard detection and enumeration
-if device.is_midi {
-    println!("MIDI keyboard connected!");
-    println!("VID: {:04x}, PID: {:04x}", device.device_desc.id_vendor, device.device_desc.id_product);
-    // Ready for MIDI message parsing and real-time data transfer
-}
-```
+- **imxrt-usbh-midi**: MIDI keyboard and controller support
+- **imxrt-usbh-hid**: Human Interface Devices (keyboards, mice)
+- **imxrt-usbh-msc**: Mass Storage Class (USB drives)
+- **imxrt-usbh-cdc**: Communications Device Class (virtual serial ports)
+
+Each class driver provides high-level APIs specific to that device type while building on the core enumeration and transfer functionality provided here.
 
 
 ## License

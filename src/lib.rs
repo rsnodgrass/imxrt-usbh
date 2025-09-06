@@ -24,12 +24,6 @@ pub mod enumeration;
 #[cfg(feature = "rtic-support")]
 pub mod rtic;
 
-#[cfg(feature = "class-hid")]
-pub mod hid;
-
-#[cfg(feature = "class-msc")]
-pub mod msc;
-
 #[cfg(feature = "hub")]
 pub mod hub;
 

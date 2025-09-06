@@ -22,6 +22,9 @@ use imxrt_usbh::{
     vbus::TeensyVbus,
 };
 
+// MIDI support will come from separate imxrt-usbh-midi crate
+// use imxrt_usbh_midi::{MidiDevice, MidiManager};
+
 #[rtic::app(device = teensy4_bsp, peripherals = true)]
 mod app {
     use super::*;

@@ -46,8 +46,6 @@ rtic-support = [
     "dep:rtic-sync",
 ]
 alloc = []
-class-hid = []
-class-msc = []
 hub = []
 defmt = ["dep:defmt"]
 tracing = ["dep:tracing"]
