@@ -49,7 +49,7 @@ use imxrt_usbh::{
     enumeration::DeviceEnumerator,
     dma::memory::USB_MEMORY_POOL,
     ehci::controller::EhciController,
-    BulkTransferManager, Direction,
+    BulkTransferManager, InterruptTransferManager, Direction,
 };
 
 // Initialize USB host
@@ -79,6 +79,20 @@ let transfer_id = bulk_manager.submit(
 // Start the transfer
 bulk_manager.start_transfer(transfer_id, &mut allocator)?;
 
+// Setup periodic interrupt transfer (for HID devices)
+let mut interrupt_manager = InterruptTransferManager::new();
+let hid_buffer = buffer_pool.alloc(64)?;
+
+let int_transfer_id = interrupt_manager.submit(
+    Direction::In,        // Read from device
+    device.address,       // Device address
+    0x81,                 // Interrupt IN endpoint
+    64,                   // Max packet size
+    hid_buffer,           // DMA buffer
+    10,                   // Poll every 10ms
+    true,                 // Periodic transfer
+)?;
+
 // Device class handling happens in separate crates:
 // - imxrt-usbh-midi for MIDI keyboards
 // - imxrt-usbh-hid for mice/keyboards
@@ -95,7 +109,9 @@ bulk_manager.start_transfer(transfer_id, &mut allocator)?;
 - ✅ **RTIC integration**: Real-time interrupt handling
 - ✅ **Cache coherency**: Proper Cortex-M7 cache operations
 - ✅ **Device detection**: Identifies device classes (Audio, HID, MSC, etc.)
-- ✅ **Bulk transfer implementation**: IN/OUT endpoint data transfer
+- ✅ **Bulk transfer implementation**: IN/OUT endpoint data transfer  
+- ✅ **Interrupt transfer implementation**: Periodic endpoint data transfer
+- ✅ **Isochronous transfer implementation**: Real-time streaming data transfer
 - 🔄 **Hub support**: Multiple device enumeration
 
 

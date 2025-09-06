@@ -7,8 +7,12 @@ use crate::error::UsbError;
 pub mod control;
 pub mod simple_control;
 pub mod bulk;
+pub mod interrupt;
+pub mod isochronous;
 
 pub use bulk::{BulkTransfer, BulkTransferManager, BulkState, bulk_endpoint};
+pub use interrupt::{InterruptTransfer, InterruptTransferManager, InterruptState, interrupt_endpoint};
+pub use isochronous::{IsochronousTransfer, IsochronousTransferManager, IsochronousState, MicroframeTiming, isochronous_endpoint};
 
 /// USB transfer types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
