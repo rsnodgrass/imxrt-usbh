@@ -256,3 +256,203 @@ impl QueueHead {
 // Ensure size is correct per EHCI spec
 const _: () = assert!(core::mem::size_of::<QueueHead>() == 96);
 const _: () = assert!(core::mem::align_of::<QueueHead>() >= 32);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::sync::atomic::Ordering;
+    
+    #[test]
+    fn test_qh_creation() {
+        let qh = QueueHead::new();
+        
+        // Verify initial state
+        assert_eq!(qh.horizontal_link.load(Ordering::Relaxed), QueueHead::TERMINATE);
+        assert_eq!(qh.current_qtd.load(Ordering::Relaxed), QueueHead::TERMINATE);
+        assert_eq!(qh.next_qtd.load(Ordering::Relaxed), QueueHead::TERMINATE);
+        assert_eq!(qh.endpoint_chars.load(Ordering::Relaxed), 0);
+        assert_eq!(qh.endpoint_caps.load(Ordering::Relaxed), 0);
+    }
+    
+    #[test]
+    fn test_qh_endpoint_init() {
+        let qh = QueueHead::new();
+        
+        // Test valid initialization
+        let result = qh.init_endpoint(5, 1, 512, endpoint::SPEED_HIGH, false);
+        assert!(result.is_ok());
+        
+        let chars = qh.endpoint_chars.load(Ordering::Relaxed);
+        
+        // Verify device address
+        assert_eq!(
+            (chars >> endpoint::DEVICE_ADDRESS_SHIFT) & endpoint::DEVICE_ADDRESS_MASK,
+            5
+        );
+        
+        // Verify endpoint number
+        assert_eq!(
+            (chars >> endpoint::ENDPOINT_NUMBER_SHIFT) & endpoint::ENDPOINT_NUMBER_MASK,
+            1
+        );
+        
+        // Verify max packet size
+        assert_eq!(
+            (chars >> endpoint::MAX_PACKET_LENGTH_SHIFT) & endpoint::MAX_PACKET_LENGTH_MASK,
+            512
+        );
+        
+        // Verify speed
+        assert_eq!(
+            (chars >> endpoint::ENDPOINT_SPEED_SHIFT) & endpoint::ENDPOINT_SPEED_MASK,
+            endpoint::SPEED_HIGH
+        );
+        
+        // Should not be control endpoint
+        assert_eq!(chars & endpoint::CONTROL_ENDPOINT, 0);
+    }
+    
+    #[test]
+    fn test_qh_control_endpoint_init() {
+        let qh = QueueHead::new();
+        
+        let result = qh.init_endpoint(1, 0, 64, endpoint::SPEED_FULL, true);
+        assert!(result.is_ok());
+        
+        let chars = qh.endpoint_chars.load(Ordering::Relaxed);
+        
+        // Should be marked as control endpoint
+        assert_ne!(chars & endpoint::CONTROL_ENDPOINT, 0);
+        assert_ne!(chars & endpoint::DATA_TOGGLE_CONTROL, 0);
+        
+        // Verify NAK count reload for non-high-speed
+        let nak_count = (chars >> endpoint::NAK_COUNT_RELOAD_SHIFT) & endpoint::NAK_COUNT_RELOAD_MASK;
+        assert_eq!(nak_count, 4);
+    }
+    
+    #[test]
+    fn test_qh_invalid_parameters() {
+        let qh = QueueHead::new();
+        
+        // Test invalid device address (>127)
+        let result = qh.init_endpoint(128, 0, 64, endpoint::SPEED_HIGH, true);
+        assert!(matches!(result, Err(UsbError::InvalidParameter)));
+        
+        // Test invalid endpoint number (>15)
+        let result = qh.init_endpoint(1, 16, 64, endpoint::SPEED_HIGH, true);
+        assert!(matches!(result, Err(UsbError::InvalidParameter)));
+        
+        // Test invalid max packet size (>1024)
+        let result = qh.init_endpoint(1, 0, 1025, endpoint::SPEED_HIGH, true);
+        assert!(matches!(result, Err(UsbError::InvalidParameter)));
+    }
+    
+    #[test]
+    fn test_qh_split_transaction_config() {
+        let qh = QueueHead::new();
+        
+        // First initialize endpoint
+        qh.init_endpoint(1, 1, 64, endpoint::SPEED_FULL, false).unwrap();
+        
+        // Configure for split transaction
+        let result = qh.configure_split(3, 2, 0x01, 0x02);
+        assert!(result.is_ok());
+        
+        let caps = qh.endpoint_caps.load(Ordering::Relaxed);
+        
+        // Verify hub address
+        assert_eq!(
+            (caps >> capabilities::HUB_ADDRESS_SHIFT) & capabilities::HUB_ADDRESS_MASK,
+            3
+        );
+        
+        // Verify hub port
+        assert_eq!(
+            (caps >> capabilities::PORT_NUMBER_SHIFT) & capabilities::PORT_NUMBER_MASK,
+            2
+        );
+        
+        // Verify split completion mask
+        assert_eq!(
+            (caps >> capabilities::SPLIT_COMPLETION_MASK_SHIFT) & capabilities::SPLIT_COMPLETION_MASK_MASK,
+            0x02
+        );
+        
+        // Verify interrupt schedule mask
+        assert_eq!(
+            (caps >> capabilities::INTERRUPT_SCHEDULE_MASK_SHIFT) & capabilities::INTERRUPT_SCHEDULE_MASK_MASK,
+            0x01
+        );
+    }
+    
+    #[test]
+    fn test_qh_split_invalid_params() {
+        let qh = QueueHead::new();
+        
+        // Test invalid hub address (>127)
+        let result = qh.configure_split(128, 1, 0x01, 0x02);
+        assert!(matches!(result, Err(UsbError::InvalidParameter)));
+        
+        // Test invalid hub port (>127)
+        let result = qh.configure_split(1, 128, 0x01, 0x02);
+        assert!(matches!(result, Err(UsbError::InvalidParameter)));
+    }
+    
+    #[test]
+    fn test_qh_overlay_reset() {
+        let qh = QueueHead::new();
+        
+        // Set some values in overlay
+        qh.current_qtd.store(0x1000, Ordering::Relaxed);
+        qh.next_qtd.store(0x2000, Ordering::Relaxed);
+        qh.token.store(0x3000, Ordering::Relaxed);
+        qh.buffer_pointers[0].store(0x4000, Ordering::Relaxed);
+        
+        // Reset overlay
+        qh.reset_overlay();
+        
+        // Verify reset
+        assert_eq!(qh.current_qtd.load(Ordering::Relaxed), QueueHead::TERMINATE);
+        assert_eq!(qh.next_qtd.load(Ordering::Relaxed), QueueHead::TERMINATE);
+        assert_eq!(qh.alt_next_qtd.load(Ordering::Relaxed), QueueHead::TERMINATE);
+        assert_eq!(qh.token.load(Ordering::Relaxed), 0);
+        assert_eq!(qh.buffer_pointers[0].load(Ordering::Relaxed), 0);
+    }
+    
+    #[test]
+    fn test_qh_head_of_list() {
+        let qh = QueueHead::new();
+        
+        // Initially not head of list
+        let chars = qh.endpoint_chars.load(Ordering::Relaxed);
+        assert_eq!(chars & endpoint::HEAD_OF_LIST, 0);
+        
+        // Set as head of list
+        qh.set_head_of_list();
+        
+        let chars = qh.endpoint_chars.load(Ordering::Relaxed);
+        assert_ne!(chars & endpoint::HEAD_OF_LIST, 0);
+    }
+    
+    #[test]
+    fn test_qh_constants() {
+        // Verify type constants
+        assert_eq!(QueueHead::TYPE_ITD, 0 << 1);
+        assert_eq!(QueueHead::TYPE_QH, 1 << 1);
+        assert_eq!(QueueHead::TYPE_SITD, 2 << 1);
+        assert_eq!(QueueHead::TYPE_FSTN, 3 << 1);
+        assert_eq!(QueueHead::TERMINATE, 1);
+    }
+    
+    #[test]
+    fn test_qh_size_alignment() {
+        // Verify structure size and alignment requirements
+        assert_eq!(core::mem::size_of::<QueueHead>(), 96);
+        assert!(core::mem::align_of::<QueueHead>() >= 32);
+        
+        // Verify proper alignment when allocated
+        let qh = QueueHead::new();
+        let addr = &qh as *const _ as usize;
+        assert_eq!(addr & 0x1F, 0, "QueueHead not 32-byte aligned");
+    }
+}

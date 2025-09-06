@@ -214,3 +214,113 @@ impl QueueTD {
 const _: () = assert!(core::mem::size_of::<QueueTD>() >= 64);
 const _: () = assert!(core::mem::align_of::<QueueTD>() == 32);
 const _: () = assert!(core::mem::align_of::<QueueTD>() >= 32);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::sync::atomic::Ordering;
+    
+    #[test]
+    fn test_qtd_creation() {
+        let qtd = QueueTD::new();
+        
+        // Verify initial state
+        assert_eq!(qtd.next_qtd.load(Ordering::Relaxed), QueueTD::TERMINATE);
+        assert_eq!(qtd.alt_next_qtd.load(Ordering::Relaxed), QueueTD::TERMINATE);
+        assert_eq!(qtd.token.load(Ordering::Relaxed), 0);
+    }
+    
+    #[test]
+    fn test_qtd_active_status() {
+        let qtd = QueueTD::new();
+        
+        // Initially not active
+        assert!(!qtd.is_active());
+        
+        // Set active status
+        qtd.token.store(token::STATUS_ACTIVE, Ordering::Relaxed);
+        assert!(qtd.is_active());
+    }
+    
+    #[test]
+    fn test_qtd_error_detection() {
+        let qtd = QueueTD::new();
+        
+        // No error initially
+        assert!(qtd.has_error().is_none());
+        
+        // Test halted with babble error
+        qtd.token.store(token::STATUS_HALTED | token::STATUS_BABBLE, Ordering::Relaxed);
+        assert!(matches!(qtd.has_error(), Some(UsbError::TransactionError)));
+        
+        // Test halted with buffer error
+        qtd.reset();
+        qtd.token.store(token::STATUS_HALTED | token::STATUS_DATA_BUFFER_ERROR, Ordering::Relaxed);
+        assert!(matches!(qtd.has_error(), Some(UsbError::BufferOverflow)));
+        
+        // Test halted with transaction error
+        qtd.reset();
+        qtd.token.store(token::STATUS_HALTED | token::STATUS_TRANSACTION_ERROR, Ordering::Relaxed);
+        assert!(matches!(qtd.has_error(), Some(UsbError::TransactionError)));
+        
+        // Test generic halt (stall)
+        qtd.reset();
+        qtd.token.store(token::STATUS_HALTED, Ordering::Relaxed);
+        assert!(matches!(qtd.has_error(), Some(UsbError::Stall)));
+    }
+    
+    #[test]
+    fn test_qtd_bytes_transferred() {
+        let qtd = QueueTD::new();
+        
+        // Set total bytes in token
+        let bytes = 512u32;
+        let token = bytes << token::TOTAL_BYTES_SHIFT;
+        qtd.token.store(token, Ordering::Relaxed);
+        
+        assert_eq!(qtd.bytes_transferred(), bytes as usize);
+    }
+    
+    #[test]
+    fn test_qtd_reset() {
+        let qtd = QueueTD::new();
+        
+        // Set some values
+        qtd.next_qtd.store(0x1234, Ordering::Relaxed);
+        qtd.token.store(token::STATUS_ACTIVE, Ordering::Relaxed);
+        qtd.buffer_pointers[0].store(0x5678, Ordering::Relaxed);
+        
+        // Reset
+        qtd.reset();
+        
+        // Verify reset state
+        assert_eq!(qtd.next_qtd.load(Ordering::Relaxed), QueueTD::TERMINATE);
+        assert_eq!(qtd.alt_next_qtd.load(Ordering::Relaxed), QueueTD::TERMINATE);
+        assert_eq!(qtd.token.load(Ordering::Relaxed), 0);
+        assert_eq!(qtd.buffer_pointers[0].load(Ordering::Relaxed), 0);
+    }
+    
+    #[test]
+    fn test_qtd_constants() {
+        // Verify important constants
+        assert_eq!(QueueTD::TERMINATE, 1);
+        assert_eq!(QueueTD::MAX_TRANSFER_SIZE, 20 * 1024);
+        
+        // Verify token constants
+        assert_eq!(token::PID_OUT, 0x0 << 8);
+        assert_eq!(token::PID_IN, 0x1 << 8);
+        assert_eq!(token::PID_SETUP, 0x2 << 8);
+    }
+    
+    #[test]
+    fn test_qtd_size_alignment() {
+        // Verify structure size and alignment requirements
+        assert!(core::mem::size_of::<QueueTD>() >= 64);
+        assert_eq!(core::mem::align_of::<QueueTD>(), 32);
+        
+        // Verify it's properly aligned when allocated
+        let qtd = QueueTD::new();
+        let addr = &qtd as *const _ as usize;
+        assert_eq!(addr & 0x1F, 0, "QueueTD not 32-byte aligned");
+    }
+}

@@ -15,6 +15,7 @@ cortex-m-rt = { version = "0.7", optional = true }
 imxrt-ral = { version = "0.5", features = ["imxrt1062"] }
 imxrt-hal = { version = "0.5", features = ["imxrt1060"], optional = true }
 embedded-hal = "1.0"
+embedded-hal-nb = "1.0"  # Added for proper embedded-hal integration
 nb = "1.1"
 heapless = "0.8"
 critical-section = "1.1"
@@ -38,22 +39,66 @@ rtic = { version = "2.0", features = ["thumbv7-backend"] }
 rtic-monotonics = { version = "1.5", features = ["cortex-m-systick"] }
 
 [features]
+# Default features for embedded use
 default = ["defmt"]
-rt = ["cortex-m-rt"]
+
+# Core features
+rt = ["cortex-m-rt"]  # Runtime support
+hal = ["dep:imxrt-hal"]  # HAL integration
+hub = []  # Hub support (including Transaction Translator)
+
+# RTOS integration
 rtic-support = [
     "dep:rtic",
     "dep:rtic-monotonics",
     "dep:rtic-sync",
 ]
-alloc = []
-hub = []
-defmt = ["dep:defmt"]
-tracing = ["dep:tracing"]
-hal = ["dep:imxrt-hal"]
 
-# Examples will be added once core implementation is complete
+# Memory management
+alloc = []  # Enable alloc support (requires allocator)
 
+# Debugging/logging
+defmt = ["dep:defmt"]  # defmt logging (embedded)
+tracing = ["dep:tracing"]  # tracing support (desktop)
+
+# Testing
+std = []  # Enable std for unit testing
+test-utils = []  # Test utilities and mocks
+
+# Documentation
+doc = []  # Enable all features for docs.rs
+
+# Profile configurations for embedded optimization
 [profile.release]
-opt-level = "z"
-lto = true
+opt-level = "z"  # Optimize for size
+lto = true  # Link-time optimization
+debug = true  # Keep debug info
+codegen-units = 1  # Better optimization
+strip = false  # Keep symbols for debugging
+
+[profile.release.package."*"]
+opt-level = "z"  # Optimize dependencies for size
+strip = true  # Strip symbols from dependencies
+
+[profile.dev]
+opt-level = 1  # Some optimization in dev
 debug = true
+
+[profile.dev.package."*"]
+opt-level = "z"  # Optimize dependencies even in dev
+
+# Minimal binary size for production
+[profile.release-min]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+debug = false
+strip = true
+panic = "abort"
+
+# docs.rs configuration
+[package.metadata.docs.rs]
+all-features = true
+default-target = "thumbv7em-none-eabihf"
+targets = ["thumbv7em-none-eabihf", "thumbv7em-none-eabi"]
+rustdoc-args = ["--cfg", "docsrs"]
