@@ -6,6 +6,23 @@
 //! 
 //! This driver provides USB host functionality for the i.MX RT1062 microcontroller,
 //! specifically targeting Teensy 4.0 and 4.1 boards.
+//! 
+//! # Learning Path
+//! 
+//! This is a low-level USB host driver. For learning and getting started:
+//! 
+//! 1. **Start with examples**: Check the `examples/` directory for educational code
+//! 2. **Understand transfers**: Learn about [`transfer`] modules for different USB transfer types  
+//! 3. **Advanced control**: Use [`ehci`] module for direct hardware control
+//! 
+//! # Core Components
+//! 
+//! - [`ehci`] - EHCI USB host controller interface
+//! - [`phy`] - USB PHY management and calibration
+//! - [`transfer`] - USB transfer types (bulk, interrupt, control, isochronous)
+//! - [`dma`] - DMA buffer management with cache coherency
+//! - [`enumeration`] - USB device enumeration and descriptor parsing
+//! - [`error`] - Comprehensive error types with recovery guidance
 
 #[cfg(feature = "defmt")]
 use defmt as _;
