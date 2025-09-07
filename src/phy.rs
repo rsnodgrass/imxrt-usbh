@@ -33,7 +33,6 @@ mod timing {
 /// PHY control bits per RM 66.6.33
 const USBPHY_CTRL_SFTRST: u32 = 1 << 31;
 const USBPHY_CTRL_CLKGATE: u32 = 1 << 30;
-const USBPHY_CTRL_ENDEVPLUGINDET: u32 = 1 << 4;
 const USBPHY_CTRL_HOSTDISCONDETECT_IRQ: u32 = 1 << 3;
 const USBPHY_CTRL_ENHOSTDISCONDETECT: u32 = 1 << 1;
 

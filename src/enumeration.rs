@@ -4,10 +4,9 @@
 //! Example focus: MIDI keyboard enumeration
 
 use crate::error::{Result, UsbError};
-use crate::transfer::simple_control::{SimpleControlTransfer, ControlExecutor, SetupPacket};
+use crate::transfer::simple_control::{ControlExecutor, SetupPacket};
 use crate::dma::memory::UsbMemoryPool;
 use crate::ehci::controller::EhciController;
-use crate::vbus::VbusPowerControl;
 
 /// USB device class codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,16 +150,22 @@ pub struct EnumeratedDevice {
 }
 
 /// USB device enumerator
-pub struct DeviceEnumerator<'a> {
-    controller: &'a mut EhciController<8>,
+pub struct DeviceEnumerator<'a, const N_PORTS: usize, State> 
+where
+    [(); N_PORTS]: Sized,
+{
+    controller: &'a mut EhciController<N_PORTS, State>,
     memory_pool: &'a mut UsbMemoryPool,
     next_address: u8,
 }
 
-impl<'a> DeviceEnumerator<'a> {
+impl<'a, const N_PORTS: usize, State> DeviceEnumerator<'a, N_PORTS, State>
+where
+    [(); N_PORTS]: Sized,
+{
     /// Create new enumerator
     pub fn new(
-        controller: &'a mut EhciController<8>,
+        controller: &'a mut EhciController<N_PORTS, State>,
         memory_pool: &'a mut UsbMemoryPool,
     ) -> Self {
         Self {
@@ -241,7 +246,7 @@ impl<'a> DeviceEnumerator<'a> {
     }
     
     /// Assign address to device
-    fn assign_address(&mut self, max_packet_size: u16) -> Result<u8> {
+    fn assign_address(&mut self, _max_packet_size: u16) -> Result<u8> {
         if self.next_address > 127 {
             return Err(UsbError::NoResources);
         }
@@ -304,7 +309,7 @@ impl<'a> DeviceEnumerator<'a> {
         &mut self,
         address: u8,
         config: u8,
-        max_packet_size: u16,
+        _max_packet_size: u16,
     ) -> Result<()> {
         ControlExecutor::set_configuration(address, config, self.memory_pool)?;
         

@@ -5,7 +5,7 @@
 
 use crate::error::{Result, UsbError};
 use crate::dma::{QhHandle, QtdHandle, DescriptorAllocator, DmaBuffer, cache_ops};
-use crate::transfer::{Direction, TransferType};
+use crate::transfer::Direction;
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 /// Bulk transfer states
@@ -156,7 +156,7 @@ impl BulkTransfer {
         
         if let Some(ref buffer) = self.data_buffer {
             // Configure qTD for bulk transfer
-            let buffer_addr = buffer.dma_addr() + transferred;
+            let _buffer_addr = buffer.dma_addr() + transferred;
             let toggle = self.data_toggle.load(Ordering::Acquire);
             
             // This would configure the actual hardware qTD:

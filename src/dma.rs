@@ -62,7 +62,7 @@ pub unsafe fn init_dma_region() -> Result<()> {
     }
     
     // Get DMA region address
-    let region_addr = unsafe { &raw const DMA_REGION as usize };
+    let region_addr = &raw const DMA_REGION as usize;
     let region_size = size_of::<DmaRegion>();
     
     // Validate region bounds
@@ -91,7 +91,6 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
     const MPU_RASR_AP_RW: u32 = 0b011 << 24;   // Read/Write access
     const MPU_RASR_TEX_DEVICE: u32 = 0b000 << 19; // Device memory
     const MPU_RASR_SHAREABLE: u32 = 1 << 18;
-    const MPU_RASR_CACHEABLE: u32 = 0 << 17;   // Non-cacheable
     const MPU_RASR_BUFFERABLE: u32 = 1 << 16;
     const MPU_RASR_XN: u32 = 1 << 28;          // Execute never
     

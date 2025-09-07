@@ -9,6 +9,7 @@ use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 /// USB Setup packet per USB 2.0 specification
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)] // USB spec field names
 pub struct SetupPacket {
     /// Request type and direction
     pub bmRequestType: u8,
@@ -302,10 +303,10 @@ impl ControlTransfer {
         
         // Calculate transfer size for this qTD
         let remaining = self.total_bytes - self.bytes_transferred.load(Ordering::Acquire);
-        let transfer_size = remaining.min(self.max_packet_size as u32);
+        let _transfer_size = remaining.min(self.max_packet_size as u32);
         
         // Configure qTD for DATA IN with current toggle bit
-        let toggle = self.data_toggle.load(Ordering::Acquire);
+        let _toggle = self.data_toggle.load(Ordering::Acquire);
         // Hardware configuration would happen here
         
         Ok(())
@@ -327,10 +328,10 @@ impl ControlTransfer {
         
         // Calculate transfer size for this qTD
         let remaining = self.total_bytes - self.bytes_transferred.load(Ordering::Acquire);
-        let transfer_size = remaining.min(self.max_packet_size as u32);
+        let _transfer_size = remaining.min(self.max_packet_size as u32);
         
         // Configure qTD for DATA OUT with current toggle bit
-        let toggle = self.data_toggle.load(Ordering::Acquire);
+        let _toggle = self.data_toggle.load(Ordering::Acquire);
         // Hardware configuration would happen here
         
         Ok(())
@@ -421,7 +422,7 @@ impl ControlTransfer {
         // Extract bytes from qTD token field
         // Bits 30:16 contain total bytes to transfer
         // Actual bytes transferred = original - remaining
-        let remaining = (status >> 16) & 0x7FFF;
+        let _remaining = (status >> 16) & 0x7FFF;
         // This would need the original size from the qTD
         // For now, return a placeholder
         0

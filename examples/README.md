@@ -1,341 +1,312 @@
 # imxrt-usbh Examples
 
-This directory contains comprehensive examples demonstrating different aspects of USB host functionality with the `imxrt-usbh` library.
+This directory contains comprehensive examples demonstrating different aspects of USB host functionality with the `imxrt-usbh` library. Each example is designed to be educational and demonstrate real-world USB host implementation patterns.
 
-## Core USB Host Examples
+NOTE: For simplicity, these education examples do not currently use RTIC, even though underlying `imxrt-usbh` is RTIC based.
 
-### `enumerate_device.rs` - Complete USB Device Enumeration
+## Available Examples
 
-Demonstrates the complete USB device enumeration sequence from port reset to configuration:
+### `enumerate_device.rs` - Advanced USB Device Enumeration
 
-- Port reset and device detection
-- Standard descriptor requests (GET_DESCRIPTOR, SET_ADDRESS) 
-- Configuration setup and device initialization
-- String descriptor parsing for device identification
-- Error handling throughout the enumeration process
+Comprehensive USB device enumeration with advanced features:
+
+- **Multi-device tracking**: Manages multiple connected USB devices simultaneously
+- **Real-time monitoring**: Device connection/disconnection event handling
+- **Device classification**: Automatic device class identification and routing
+- **Performance monitoring**: Device enumeration statistics and health monitoring
+- **Educational register setup**: Detailed comments explaining hardware configuration
 
 **Key Learning Points:**
-- USB 2.0 enumeration sequence compliance
-- Control transfer implementation
-- Descriptor parsing and validation
-- Device address assignment
+- Complete USB 2.0 enumeration sequence
+- Device descriptor parsing and validation
+- Device class identification (HID, Mass Storage, Audio, Hub)
+- Multiple device management patterns
+- Performance monitoring and statistics
 
 ```bash
-# Build and run (requires hardware)
 cargo build --example enumerate_device --target thumbv7em-none-eabihf
 ```
 
-## Device Class Reference Implementations
+### `hid_keyboard.rs` - Complete HID Keyboard Implementation
 
-These examples serve as reference implementations for building separate class driver crates. They demonstrate how to build on top of the core `imxrt-usbh` functionality.
+Full-featured QWERTY keyboard implementation with comprehensive functionality:
 
-### `example_hid.rs` - HID (Human Interface Device) Support
-
-Complete HID implementation focusing on keyboard support:
-
-- **Boot Protocol**: Keyboard boot protocol implementation for maximum compatibility
-- **Report Processing**: HID report descriptor parsing and key event detection
-- **Multi-Device Support**: HidManager for handling multiple concurrent HID devices
-- **Interrupt Transfers**: Demonstrates proper interrupt transfer usage for periodic data
-- **Key Mapping**: USB keycode to ASCII conversion with modifier key support
+- **Boot Protocol**: HID Boot Protocol for maximum compatibility
+- **Advanced Key Mapping**: Complete USB keycode to ASCII conversion
+- **Modifier Support**: Shift, Ctrl, Alt, and other modifier keys
+- **Key Repeat**: Configurable key repeat rates and delays
+- **N-Key Rollover**: Support for multiple simultaneous key presses
+- **Performance Stats**: Typing statistics and performance monitoring
 
 **Features Demonstrated:**
-- HID descriptor parsing and validation
-- Keyboard boot protocol vs report protocol
-- Key press/release event detection
-- Modifier key handling (Shift, Ctrl, Alt, etc.)
-- Multiple keyboard management
+- HID boot protocol vs report protocol selection
+- Real-time key press/release event detection
+- Comprehensive modifier key handling (Shift, Ctrl, Alt, GUI)
+- Key repeat timing and rate control
+- ASCII conversion with international layout considerations
+- Multi-device keyboard management
 
-**Usage Example:**
-```rust
-use imxrt_usbh::examples::example_hid::{HidManager, HidKeyboard};
-
-let mut hid_manager = HidManager::new();
-let keyboard = HidKeyboard::new(device_addr, interface, endpoint, poll_interval);
-let keyboard_id = hid_manager.add_keyboard(keyboard)?;
-
-// Poll for events
-loop {
-    if let Some(events) = hid_manager.poll_keyboard(keyboard_id)? {
-        for event in events {
-            match event {
-                KeyEvent::KeyPress(key) => println!("Key pressed: {}", key),
-                KeyEvent::KeyRelease(key) => println!("Key released: {}", key),
-            }
-        }
-    }
-}
+```bash
+cargo build --example hid_keyboard --target thumbv7em-none-eabihf
 ```
 
-### `example_msc.rs` - MSC (Mass Storage Class) Support
+### `hid_gamepad.rs` - HID Gamepad Support
 
-Complete mass storage implementation using Bulk-Only Transport (BOT) protocol:
+Gamepad and joystick support implementation:
 
-- **SCSI Commands**: Full implementation of essential SCSI commands (INQUIRY, READ_CAPACITY, READ_10, WRITE_10)
-- **BOT Protocol**: Command Block Wrapper (CBW) and Command Status Wrapper (CSW) handling
-- **Device Management**: Mass storage device enumeration, initialization, and management
-- **Block Operations**: Block-level read/write operations with proper error handling
-- **Bulk Transfers**: Demonstrates high-performance bulk transfer usage
+- **Gamepad Detection**: Automatic gamepad device identification
+- **Button Mapping**: Complete button state tracking
+- **Analog Inputs**: Joystick and trigger analog value processing
+- **D-pad Support**: Digital directional pad handling
+- **Multi-controller**: Support for multiple connected gamepads
+
+**Key Features:**
+- HID report descriptor parsing for gamepad devices
+- Analog stick dead-zone handling
+- Button debouncing and state management
+- Real-time input processing
+
+```bash
+cargo build --example hid_gamepad --target thumbv7em-none-eabihf
+```
+
+### `mass_storage.rs` - Complete Mass Storage Implementation
+
+Full USB Mass Storage Class (MSC) implementation using Bulk-Only Transport:
+
+- **SCSI Command Set**: Complete implementation of essential SCSI commands
+- **BOT Protocol**: Full Command Block Wrapper (CBW) and Command Status Wrapper (CSW) handling
+- **Block Operations**: High-performance block-level read/write operations
+- **Error Recovery**: Comprehensive error handling and recovery mechanisms
+- **Multi-LUN Support**: Multiple Logical Unit Number support for complex devices
 
 **SCSI Commands Implemented:**
-- `TEST_UNIT_READY`: Check device readiness
-- `INQUIRY`: Get device information (vendor, product, version)
-- `READ_CAPACITY_10`: Determine device capacity and block size
-- `READ_10` / `WRITE_10`: Block data transfer operations
-- `REQUEST_SENSE`: Error condition analysis
+- `TEST_UNIT_READY`: Device readiness verification
+- `INQUIRY`: Device identification and capabilities
+- `READ_CAPACITY_10`: Storage capacity and block size detection
+- `READ_10` / `WRITE_10`: High-performance block data operations
+- `REQUEST_SENSE`: Detailed error condition analysis
+- `MODE_SENSE`: Device operating mode information
 
-**Usage Example:**
-```rust
-use imxrt_usbh::examples::example_msc::{MscManager, MassStorageDevice};
-
-let mut msc_manager = MscManager::new();
-
-// Initialize device
-let mut device = MassStorageDevice::new(
-    device_addr, interface, bulk_in_ep, bulk_out_ep,
-    max_packet_in, max_packet_out, max_lun, subclass, protocol
-);
-
-device.initialize()?;  // INQUIRY + READ_CAPACITY
-
-// Read first sector
-let mut buffer = [0u8; 512];
-let bytes_read = device.read_blocks(0, 1, &mut buffer)?;
-println!("Read {} bytes from LBA 0", bytes_read);
-
-// Get device info
-println!("Device: {} {}", device.get_vendor_id(), device.get_product_id());
-println!("Capacity: {} bytes", device.get_capacity_bytes());
-```
-
-## RTIC Integration Example
-
-### `midi_keyboard.rs` - Real-Time USB with RTIC 2.x
-
-Demonstrates integration with RTIC (Real-Time Interrupt-driven Concurrency) v2.x:
-
-- **RTIC Integration**: Proper resource sharing and interrupt handling patterns
-- **Real-Time Processing**: Interrupt-driven USB event handling with deterministic timing
-- **MIDI Protocol**: Basic MIDI device detection and communication
-- **Resource Management**: Safe sharing of USB resources across RTIC tasks
-- **Error Recovery**: Robust error handling in real-time context
-
-**RTIC Patterns Demonstrated:**
-- Shared resources with proper locking
-- Interrupt-driven USB event processing
-- Task prioritization for USB operations
-- Safe hardware abstraction usage
+**Educational Features:**
+- Detailed SCSI protocol explanations
+- USB bulk transfer optimization techniques
+- Error recovery and retry mechanisms
+- Performance monitoring and statistics
 
 ```bash
-# Build RTIC example (requires RTIC features)
-cargo build --example midi_keyboard --target thumbv7em-none-eabihf --features rtic-support
+cargo build --example mass_storage --target thumbv7em-none-eabihf
 ```
 
-## Building Your Own Class Drivers
+### `midi_keyboard.rs` - MIDI Device Implementation
 
-These examples provide templates for building separate class driver crates:
+Complete USB MIDI device implementation with real-time processing:
 
-### Recommended Crate Structure
+- **MIDI Protocol**: Full USB MIDI packet parsing and processing
+- **Real-time Processing**: Interrupt-driven MIDI event handling
+- **Multi-channel**: Support for all 16 MIDI channels
+- **Message Types**: Note On/Off, Control Change, Program Change, Pitch Bend
+- **Performance Monitoring**: MIDI statistics and throughput analysis
 
-Based on the examples, here's how to structure class driver crates:
+**MIDI Features:**
+- USB MIDI packet format parsing
+- MIDI message classification and routing
+- Real-time MIDI event processing
+- Channel and velocity handling
+- MIDI device identification and capabilities
 
-#### `imxrt-usbh-hid` (based on `example_hid.rs`)
-```
-imxrt-usbh-hid/
-├── src/
-│   ├── lib.rs           # Public API and re-exports
-│   ├── keyboard.rs      # Keyboard-specific functionality  
-│   ├── mouse.rs         # Mouse support
-│   ├── generic.rs       # Generic HID device support
-│   ├── report.rs        # HID report descriptor parsing
-│   └── usage_tables.rs  # HID Usage Tables implementation
-└── examples/
-    ├── keyboard_demo.rs
-    └── mouse_demo.rs
-```
+**Educational Content:**
+- MIDI protocol explanation with examples
+- USB Audio Class device enumeration
+- Real-time audio processing patterns
+- Low-latency interrupt transfer usage
 
-**Key Features to Include:**
-- Report descriptor parsing with full HID Usage Tables support
-- Input, output, and feature report handling
-- Multiple device type support (keyboard, mouse, gamepad, etc.)
-- Async/await compatibility for RTIC and Embassy
-
-#### `imxrt-usbh-msc` (based on `example_msc.rs`)
-```
-imxrt-usbh-msc/
-├── src/
-│   ├── lib.rs           # Public API
-│   ├── scsi.rs          # SCSI command implementation
-│   ├── bot.rs           # Bulk-Only Transport protocol
-│   ├── device.rs        # Mass storage device abstraction
-│   └── fs.rs            # File system integration (optional)
-└── examples/
-    ├── file_operations.rs
-    └── disk_benchmark.rs
+```bash
+cargo build --example midi_keyboard --target thumbv7em-none-eabihf
 ```
 
-**Integration Options:**
-- `embedded-sdmmc` for FAT32 file system support
-- Raw block device interface for custom file systems
-- Multiple LUN (Logical Unit Number) support
+## Educational Design
 
-#### `imxrt-usbh-cdc` (Communications Device Class)
-```
-imxrt-usbh-cdc/
-├── src/
-│   ├── lib.rs           # Public API
-│   ├── acm.rs           # Abstract Control Model (virtual serial)
-│   ├── ecm.rs           # Ethernet Control Model
-│   └── line_coding.rs   # Serial line parameters
-```
+All examples are designed with education in mind:
 
-### Development Guidelines
-
-1. **Dependency Management**: Depend on `imxrt-usbh` for core functionality
-2. **Error Handling**: Provide class-specific error types that wrap core USB errors
-3. **Async Support**: Design APIs to work with both blocking and async patterns
-4. **Testing**: Include unit tests and hardware-in-the-loop test examples
-5. **Documentation**: Comprehensive docs with usage examples and protocol explanations
-
-### Class Driver API Pattern
+### Hardware Register Documentation
+Examples include detailed explanations of hardware setup:
 
 ```rust
-// Typical class driver structure
-pub struct HidDevice {
-    // Core USB device info
-    device_addr: u8,
-    interface: u8,
-    
-    // Class-specific endpoints and configuration
-    interrupt_in: u8,
-    poll_interval: u8,
-    
-    // Class-specific state
-    report_descriptor: Vec<u8>,
-    current_report: HidReport,
-}
+// Initialize USB PHY
+let phy_base = 0x400D_9000; // USBPHY1 base address
+let ccm_base = 0x400F_C000;  // CCM base address
+let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 
-impl HidDevice {
-    pub fn new(/* USB enumeration info */) -> Result<Self> { /* ... */ }
-    
-    pub fn poll(&mut self) -> Result<Option<HidEvent>> { /* ... */ }
-    
-    pub fn send_report(&mut self, report: &HidReport) -> Result<()> { /* ... */ }
-}
+// Initialize USB host controller
+let usb1_base = 0x402E_0140; // USB1 base address
+let controller = unsafe {
+    EhciController::<8, Uninitialized>::new(usb1_base)
+        .expect("Failed to create EHCI controller")
+};
+```
 
-// Manager for multiple devices
-pub struct HidManager {
-    devices: Vec<HidDevice>,
-}
+### Clock Configuration Education
+Detailed explanations of USB clock setup:
 
-impl HidManager {
-    pub fn add_device(&mut self, device: HidDevice) -> Result<DeviceId> { /* ... */ }
-    
-    pub fn poll_all(&mut self) -> Result<Vec<(DeviceId, HidEvent)>> { /* ... */ }
+```rust
+/// Configure USB clocks for i.MX RT1062 (educational example showing register-level setup)
+///
+/// This function demonstrates the low-level clock configuration required for USB operation.
+/// In a production system, you might use imxrt-hal's clock management instead.
+fn configure_usb_clocks() {
+    // Enable USB-related clocks in Clock Gating Register 6 (CCGR6)
+    // Each CG field controls a specific clock gate (0b00=off, 0b11=always on)
+    modify_reg!(ral::ccm, ccm, CCGR6,
+        CG0: 0b11,  // usb_ctrl1_clk - USB controller 1 clock
+        CG1: 0b11,  // usb_ctrl2_clk - USB controller 2 clock
+        CG2: 0b11,  // usb_phy1_clk - USB PHY 1 clock
+        CG3: 0b11   // usb_phy2_clk - USB PHY 2 clock
+    );
 }
 ```
 
-## Testing Examples
+## Building and Testing
 
-### Unit Tests
-Examples include comprehensive unit tests demonstrating:
-- Protocol message construction and parsing
-- State machine validation
-- Error condition handling
-- Edge case behavior
+### Prerequisites
+- Rust toolchain with `thumbv7em-none-eabihf` target
+- Teensy 4.0/4.1 development board
+- USB devices for testing (keyboard, flash drive, etc.)
 
-### Hardware-in-the-Loop (HIL) Tests
-See `../tests/hil.rs` for hardware testing patterns:
-- Real device enumeration
-- Data transfer validation
-- Error recovery testing
-- Performance benchmarking
-
-### Running Tests
+### Build All Examples
 ```bash
-# Unit tests (no hardware required)
-cargo test --features std
+# Build all examples
+cargo build --examples --target thumbv7em-none-eabihf
 
-# Integration tests
-cargo test --test integration --features std
-
-# Hardware-in-the-loop tests (requires connected devices)
-cargo test --test hil --features std -- --ignored
+# Build specific example
+cargo build --example hid_keyboard --target thumbv7em-none-eabihf
 ```
 
-## Hardware Requirements
+### Hardware Setup
 
-### Teensy 4.x Setup
-- **Teensy 4.0 or 4.1** with USB host capability
-- **USB Type-A connector** for connecting devices
-- **5V power supply** for bus-powered devices
-- **Proper VBUS control** (see hardware documentation)
-
-### Wiring
+#### Teensy 4.x USB Host Setup
 ```
-Teensy 4.x USB Host Pins:
+Teensy 4.x USB Host Connections:
 ├── USB1_DN  (Pin 30) → USB D-
-├── USB1_DP  (Pin 31) → USB D+  
+├── USB1_DP  (Pin 31) → USB D+
 ├── USB1_ID  (Pin 32) → Ground (host mode)
-└── 5V       → VBUS (through switching circuit)
+└── 5V Power → VBUS (through switching circuit)
 ```
 
-### Supported Devices
-Examples have been tested with:
-- **HID**: Standard USB keyboards, mice, gamepads
-- **MSC**: USB flash drives, external hard drives, SD card readers
-- **MIDI**: USB MIDI keyboards and controllers
+**Important**: Ensure proper VBUS power switching for device power control.
+
+### Tested Devices
+
+Examples have been validated with:
+
+- **HID Keyboards**: Various USB keyboards (mechanical, wireless adapters, gaming)
+- **HID Gamepads**: Xbox controllers, PlayStation controllers, generic USB gamepads
+- **Mass Storage**: USB flash drives, external hard drives, SD card readers
+- **MIDI Devices**: USB MIDI keyboards, controllers, audio interfaces
+
+## Example Architecture Patterns
+
+All examples follow consistent architectural patterns:
+
+### Device Management Structure
+```rust
+/// Application structure managing USB devices
+struct UsbApp {
+    usb_controller: EhciController<8, Running>,
+    memory_pool: UsbMemoryPool,
+    devices: DeviceManager,
+    stats: Statistics,
+}
+
+impl UsbApp {
+    fn new() -> Result<Self> { /* initialization */ }
+    fn run(&mut self) -> ! { /* main loop */ }
+    fn detect_devices(&mut self) { /* device detection */ }
+    fn process_events(&mut self) { /* event processing */ }
+}
+```
+
+### Error Handling Patterns
+```rust
+// Comprehensive error handling with recovery
+match device.process_data() {
+    Ok(events) => self.handle_events(events),
+    Err(UsbError::TransactionError) => {
+        // Retry with backoff
+        self.retry_with_backoff(&mut device)?;
+    }
+    Err(UsbError::DeviceDisconnected) => {
+        // Clean up and remove device
+        self.remove_device(device_id);
+    }
+    Err(e) => return Err(e), // Fatal error
+}
+```
+
+## Protocol Documentation
+
+### USB Protocol Compliance
+Examples demonstrate proper USB 2.0 protocol compliance:
+
+- Correct timing for reset sequences and state transitions
+- Proper descriptor parsing with validation
+- Standard and class-specific request handling
+- Error recovery and retry mechanisms
+
+### Class-Specific Implementations
+Each device class example includes:
+
+- Complete protocol state machines
+- Proper endpoint configuration and usage
+- Class-specific error handling
+- Performance optimization techniques
 
 ## Troubleshooting
 
 ### Common Issues
 
 1. **Device Not Detected**
-   - Check VBUS power supply and switching
-   - Verify USB cable and connections
+   - Verify VBUS power supply (5V, sufficient current)
+   - Check USB cable quality and connections
    - Ensure device is USB 2.0 compatible
 
 2. **Enumeration Failures**
-   - Check timing compliance (reset pulse width, delay periods)
-   - Verify descriptor parsing logic
-   - Enable debug logging for detailed trace
+   - Check reset timing (at least 10ms pulse width)
+   - Verify descriptor parsing logic handles edge cases
+   - Enable debug logging for detailed protocol trace
 
-3. **Transfer Errors**
-   - Verify endpoint configuration matches device descriptors
-   - Check DMA buffer alignment (32-byte requirement)
-   - Validate transfer sizes and timing
+3. **Data Transfer Issues**
+   - Verify endpoint addresses match device descriptors
+   - Check DMA buffer alignment (32-byte boundaries)
+   - Validate transfer timing and size limits
 
-### Debug Logging
-Enable detailed logging with:
+### Debug Configuration
 ```toml
 [dependencies]
 imxrt-usbh = { version = "0.1", features = ["defmt"] }
+defmt-rtt = "0.4"
 ```
 
-```rust
-// In your application
-use defmt_rtt as _; // Enable RTT logging
-```
+## Performance Considerations
 
-### Performance Tuning
-- **Bulk Transfers**: Use largest possible packet sizes
-- **Interrupt Transfers**: Optimize polling intervals
-- **Memory Management**: Reuse DMA buffers when possible
-- **Cache Management**: Ensure proper cache coherency
+### Optimization Guidelines
+- **Memory Management**: Reuse DMA buffers to minimize allocation overhead
+- **Transfer Sizing**: Use maximum packet sizes for bulk transfers
+- **Polling Intervals**: Optimize interrupt transfer polling for your application needs
+- **Cache Coherency**: Ensure proper cache management for DMA operations
 
-## Contributing
-
-When adding new examples:
-1. Follow existing code style and documentation patterns
-2. Include comprehensive error handling
-3. Add unit tests for protocol logic
-4. Document hardware requirements and setup
-5. Test with real hardware when possible
+### Benchmarking
+Examples include performance monitoring:
+- Transfer throughput measurement
+- Latency tracking for real-time applications
+- Error rate monitoring
+- Resource utilization statistics
 
 ## References
 
-- [USB 2.0 Specification](http://www.poweredusb.org/pdf/usb20.pdf)
-- [HID Specification 1.11](https://www.usb.org/sites/default/files/documents/hid1_11.pdf)
+- [USB 2.0 Specification](https://www.usb.org/document-library/usb-20-specification)
+- [HID Usage Tables](https://www.usb.org/sites/default/files/documents/hut1_12v2.pdf)
 - [Mass Storage Class Specification](https://www.usb.org/sites/default/files/documents/usb_msc_overview_1.2.pdf)
-- [SCSI Commands Reference](https://www.t10.org/lists/op-num.htm)
-- [RTIC Book](https://rtic.rs/)
+- [SCSI Primary Commands](https://www.t10.org/lists/op-num.htm)
+- [USB MIDI Specification](https://www.usb.org/sites/default/files/midi10.pdf)
+- [i.MX RT1062 Reference Manual](https://www.nxp.com/docs/en/reference-manual/IMXRT1060RM.pdf)

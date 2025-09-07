@@ -8,6 +8,7 @@ use crate::dma::{UsbMemoryPool, MemoryDmaBuffer};
 /// USB Setup packet (USB 2.0 spec)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
+#[allow(non_snake_case)] // USB spec field names
 pub struct SetupPacket {
     pub bmRequestType: u8,
     pub bRequest: u8,
@@ -113,15 +114,13 @@ impl SimpleControlTransfer {
     /// Execute SETUP stage
     fn do_setup(&mut self) -> Result<()> {
         // Queue SETUP packet with DATA0
-        unsafe {
-            // Write setup packet to controller
-            // This would interact with actual hardware
-            let setup_addr = &self.setup as *const SetupPacket as u32;
-            
-            // Simplified: just validate the setup packet
-            if setup_addr == 0 {
-                return Err(UsbError::InvalidParameter);
-            }
+        // Write setup packet to controller
+        // This would interact with actual hardware
+        let setup_addr = &self.setup as *const SetupPacket as u32;
+        
+        // Simplified: just validate the setup packet
+        if setup_addr == 0 {
+            return Err(UsbError::InvalidParameter);
         }
         
         Ok(())

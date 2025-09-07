@@ -264,7 +264,7 @@ impl RecoveryCoordinator {
     fn reset_controller(
         &mut self,
         phy: Option<&mut UsbPhy>,
-        controller: Option<&mut EhciController<8>>,
+        _controller: Option<&mut EhciController<8>>,
     ) -> Result<()> {
         #[cfg(feature = "defmt")]
         defmt::warn!("Resetting USB controller");
@@ -475,7 +475,6 @@ impl RecoveryStats {
             UsbError::Stall => 2,
             UsbError::Timeout => 5,
             UsbError::TransactionError => 6,
-            UsbError::TransactionError => 7,
             UsbError::BufferOverflow => 10,
             UsbError::InvalidParameter => 12,
             UsbError::InvalidState => 13,
@@ -484,9 +483,7 @@ impl RecoveryStats {
             UsbError::Unsupported => 17,
             UsbError::Nak => 18,
             UsbError::InvalidDescriptor => 19,
-            UsbError::PortError => 21,
             UsbError::HardwareFailure => 22,
-            UsbError::HardwareFailure => 23,
         }
     }
     

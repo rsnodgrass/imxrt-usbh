@@ -6,7 +6,7 @@
 
 use crate::error::{Result, UsbError};
 use crate::dma::{QhHandle, QtdHandle, DescriptorAllocator, DmaBuffer, cache_ops};
-use crate::transfer::{Direction, TransferType};
+use crate::transfer::Direction;
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 /// Isochronous transfer states
@@ -298,7 +298,7 @@ impl IsochronousTransfer {
     /// Process transfer completion from interrupt handler
     pub fn process_completion<const N_QH: usize, const N_QTD: usize>(
         &mut self,
-        allocator: &mut DescriptorAllocator<N_QH, N_QTD>,
+        _allocator: &mut DescriptorAllocator<N_QH, N_QTD>,
         qtd_index: usize,
         status: u32,
     ) -> Result<bool> {

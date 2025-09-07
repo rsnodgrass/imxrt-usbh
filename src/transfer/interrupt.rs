@@ -6,7 +6,7 @@
 
 use crate::error::{Result, UsbError};
 use crate::dma::{QhHandle, QtdHandle, DescriptorAllocator, DmaBuffer, cache_ops};
-use crate::transfer::{Direction, TransferType};
+use crate::transfer::Direction;
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 /// Interrupt transfer states
@@ -210,7 +210,7 @@ impl InterruptTransfer {
         
         if let Some(ref buffer) = self.data_buffer {
             // Configure qTD for interrupt transfer
-            let buffer_addr = buffer.dma_addr();
+            let _buffer_addr = buffer.dma_addr();
             let transfer_size = self.max_packet_size as u32;
             let toggle = self.data_toggle.load(Ordering::Acquire);
             
