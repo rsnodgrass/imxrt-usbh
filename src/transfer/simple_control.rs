@@ -9,6 +9,7 @@ use crate::dma::{UsbMemoryPool, MemoryDmaBuffer};
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 #[allow(non_snake_case)] // USB spec field names
+#[allow(missing_docs)]
 pub struct SetupPacket {
     pub bmRequestType: u8,
     pub bRequest: u8,
@@ -109,6 +110,22 @@ impl SimpleControlTransfer {
         
         self.completed = true;
         Ok(bytes_transferred)
+    }
+    
+    pub fn device_address(&self) -> u8 {
+        self.device_address
+    }
+    
+    pub fn endpoint(&self) -> u8 {
+        self.endpoint
+    }
+    
+    pub fn set_device_address(&mut self, address: u8) {
+        self.device_address = address;
+    }
+    
+    pub fn target_info(&self) -> (u8, u8) {
+        (self.device_address, self.endpoint)
     }
     
     /// Execute SETUP stage

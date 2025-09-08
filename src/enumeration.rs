@@ -175,6 +175,10 @@ where
         }
     }
     
+    pub fn controller(&mut self) -> &mut EhciController<N_PORTS, State> {
+        self.controller
+    }
+    
     /// Enumerate a newly connected device
     pub fn enumerate_device(&mut self) -> Result<EnumeratedDevice> {
         #[cfg(feature = "defmt")]

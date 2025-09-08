@@ -25,6 +25,17 @@ pub enum DescriptorState {
     Error = 5,
 }
 
+/// Descriptor type information for validation
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptorTypeInfo {
+    /// Type tag for validation
+    pub type_tag: u16,
+    /// Size of descriptor type
+    pub size: usize,
+    /// Pool index where allocated
+    pub pool_index: usize,
+}
+
 /// Enhanced descriptor wrapper with lifecycle tracking
 pub struct ManagedDescriptor<T> {
     /// The actual descriptor
@@ -77,6 +88,25 @@ impl<T> ManagedDescriptor<T> {
                 Ok(())
             }
             _ => Err(UsbError::InvalidState)
+        }
+    }
+    
+    /// Get pool index for recycling
+    pub fn pool_index(&self) -> usize {
+        self.pool_index as usize
+    }
+    
+    /// Validate descriptor type integrity  
+    pub fn validate_type(&self) -> bool {
+        self.type_tag == Self::type_tag_value()
+    }
+    
+    /// Get descriptor type information
+    pub fn type_info(&self) -> DescriptorTypeInfo {
+        DescriptorTypeInfo {
+            type_tag: self.type_tag,
+            size: core::mem::size_of::<T>(),
+            pool_index: self.pool_index as usize,
         }
     }
     
@@ -347,17 +377,55 @@ impl<const N_QH: usize, const N_QTD: usize> DescriptorAllocator<N_QH, N_QTD> {
 }
 
 /// Handle to allocated queue head
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QhHandle {
     index: usize,
     generation: u32,
 }
 
 /// Handle to allocated queue TD
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QtdHandle {
     index: usize,
     generation: u32,
+}
+
+impl QhHandle {
+    pub fn new(index: usize, generation: u32) -> Self {
+        Self { index, generation }
+    }
+    
+    pub fn index(&self) -> usize {
+        self.index
+    }
+    
+    pub fn generation(&self) -> u32 {
+        self.generation
+    }
+    
+    /// Check if handle is still valid (generation matches)
+    pub fn is_valid(&self, expected_generation: u32) -> bool {
+        self.generation == expected_generation
+    }
+}
+
+impl QtdHandle {
+    pub fn new(index: usize, generation: u32) -> Self {
+        Self { index, generation }
+    }
+    
+    pub fn index(&self) -> usize {
+        self.index
+    }
+    
+    pub fn generation(&self) -> u32 {
+        self.generation
+    }
+    
+    /// Check if handle is still valid (generation matches)
+    pub fn is_valid(&self, expected_generation: u32) -> bool {
+        self.generation == expected_generation
+    }
 }
 
 /// Allocation statistics for monitoring
@@ -434,6 +502,7 @@ impl AllocationStats {
 /// Statistics snapshot
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[allow(missing_docs)]
 pub struct StatsSnapshot {
     pub qh_allocations: u32,
     pub qh_frees: u32,

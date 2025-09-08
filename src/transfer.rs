@@ -17,6 +17,7 @@ pub use isochronous::{IsochronousTransfer, IsochronousTransferManager, Isochrono
 /// USB transfer types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[allow(missing_docs)]
 pub enum TransferType {
     Control,
     Bulk,
@@ -27,6 +28,7 @@ pub enum TransferType {
 /// Transfer direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[allow(missing_docs)]
 pub enum Direction {
     In,
     Out,
@@ -36,6 +38,7 @@ pub enum Direction {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[allow(missing_docs)]
 pub struct SetupPacket {
     pub request_type: u8,
     pub request: u8,
@@ -87,6 +90,7 @@ impl SetupPacket {
 /// Control transfer state machine states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[allow(missing_docs)]
 pub enum ControlState {
     Setup { attempt: u8 },
     DataIn { remaining: usize, attempt: u8 },
@@ -96,7 +100,8 @@ pub enum ControlState {
     Failed(UsbError),
 }
 
-// Placeholder for future implementation
+/// Placeholder for future implementation
+#[allow(missing_docs)]
 pub struct TransferManager {
     // Will contain qTD/qH management
 }

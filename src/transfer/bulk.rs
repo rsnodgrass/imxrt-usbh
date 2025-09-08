@@ -174,12 +174,10 @@ impl BulkTransfer {
         elapsed_ms >= self.timeout_ms
     }
     
-    /// Get timeout configuration
     pub fn timeout_ms(&self) -> u32 {
         self.timeout_ms
     }
     
-    /// Set timeout for transfer
     pub fn set_timeout(&mut self, timeout_ms: u32) {
         self.timeout_ms = timeout_ms;
     }
@@ -624,7 +622,6 @@ impl BulkTransferStats {
         self.record_stall();
     }
     
-    /// Record bytes transferred
     pub fn record_bytes(&self, bytes: u32) {
         self.total_bytes.fetch_add(bytes, Ordering::Relaxed);
     }

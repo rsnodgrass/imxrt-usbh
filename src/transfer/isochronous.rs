@@ -224,7 +224,6 @@ impl IsochronousTransfer {
         Ok(())
     }
     
-    /// Get polling interval in frames
     pub fn interval_frames(&self) -> u8 {
         self.interval_frames
     }

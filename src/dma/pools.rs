@@ -133,7 +133,7 @@ pub mod static_pools {
     }
 }
 
-/// Buffer pool for data transfers with different size classes
+/// Buffer pool for data transfers with different size classes  
 pub struct DataBufferPool<const N_SMALL: usize, const N_LARGE: usize> {
     small_buffers: [[u8; 64]; N_SMALL],
     large_buffers: [[u8; 512]; N_LARGE],
@@ -173,16 +173,71 @@ impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE
             Err(UsbError::BufferOverflow)
         }
     }
+    
+    /// Get buffer slice from handle
+    pub fn get_buffer_slice(&self, handle: &BufferHandle) -> &[u8] {
+        match handle {
+            BufferHandle::Small(i) => &self.small_buffers[*i],
+            BufferHandle::Large(i) => &self.large_buffers[*i],
+        }
+    }
+    
+    /// Get mutable buffer slice from handle
+    pub fn get_buffer_slice_mut(&mut self, handle: &BufferHandle) -> &mut [u8] {
+        match handle {
+            BufferHandle::Small(i) => &mut self.small_buffers[*i],
+            BufferHandle::Large(i) => &mut self.large_buffers[*i],
+        }
+    }
+    
+    /// Free buffer back to pool
+    pub fn free_buffer(&mut self, handle: BufferHandle) {
+        match handle {
+            BufferHandle::Small(i) => {
+                if i < N_SMALL {
+                    self.small_allocated[i].store(false, Ordering::Release);
+                }
+            }
+            BufferHandle::Large(i) => {
+                if i < N_LARGE {
+                    self.large_allocated[i].store(false, Ordering::Release);
+                }
+            }
+        }
+    }
+    
+    /// Get buffer pool statistics
+    pub fn pool_stats(&self) -> DataBufferStats {
+        let small_used = self.small_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
+        let large_used = self.large_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
+        
+        DataBufferStats {
+            small_total: N_SMALL,
+            small_allocated: small_used,
+            large_total: N_LARGE, 
+            large_allocated: large_used,
+        }
+    }
 }
 
 /// Handle to allocated buffer with automatic size tracking
 pub enum BufferHandle {
-    Small(usize),  // Index into small buffer array
-    Large(usize),  // Index into large buffer array
+    /// Small buffer (64 bytes)
+    Small(usize),
+    /// Large buffer (512 bytes)
+    Large(usize),
+}
+
+/// Data buffer pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct DataBufferStats {
+    pub small_total: usize,
+    pub small_allocated: usize,
+    pub large_total: usize,
+    pub large_allocated: usize,
 }
 
 impl BufferHandle {
-    /// Get the index for this handle
     pub fn index(&self) -> usize {
         match self {
             BufferHandle::Small(index) => *index,
