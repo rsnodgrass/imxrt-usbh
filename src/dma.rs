@@ -1,7 +1,4 @@
-//! DMA buffer management and cache coherency for USB transfers
-//! 
-//! Provides cache-coherent DMA buffers for the ARM Cortex-M7 with D-cache.
-//! Based on i.MX RT1060 RM Section 3.3.3 and ARM Cortex-M7 TRM.
+//! DMA buffer management for USB transfers
 
 pub mod pools;
 pub mod descriptor;
@@ -128,34 +125,36 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
 }
 
 /// DMA buffer allocation handle
+#[derive(Clone, Copy)]
 pub struct DmaBuffer {
     ptr: NonNull<u8>,
     size: usize,
     pool_index: usize,
 }
 
+impl PartialEq for DmaBuffer {
+    fn eq(&self, other: &Self) -> bool {
+        self.pool_index == other.pool_index
+    }
+}
+
 impl DmaBuffer {
-    /// Get buffer pointer
     pub fn as_ptr(&self) -> *const u8 {
         self.ptr.as_ptr()
     }
     
-    /// Get mutable buffer pointer
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
         self.ptr.as_ptr()
     }
     
-    /// Get buffer physical address for DMA
     pub fn dma_addr(&self) -> u32 {
         self.ptr.as_ptr() as u32
     }
     
-    /// Get buffer as slice
     pub fn as_slice(&self) -> &[u8] {
         unsafe { core::slice::from_raw_parts(self.ptr.as_ptr(), self.size) }
     }
     
-    /// Get buffer as mutable slice
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         unsafe { core::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.size) }
     }
@@ -175,18 +174,13 @@ pub mod cache_ops {
     const SCB_DCIMVAC: *mut u32 = 0xE000_EF5C as *mut u32; // Invalidate by MVA to PoC
     const SCB_DCCIMVAC: *mut u32 = 0xE000_EF70 as *mut u32; // Clean & Invalidate by MVA to PoC
     
-    /// Clean (write-back) data cache by address range
-    /// 
-    /// Use before DMA read operations to ensure data is in memory.
     pub fn clean_dcache(addr: usize, size: usize) {
         unsafe {
             dsb(); // Ensure all previous writes complete
-            
             let start = addr & !(DCACHE_LINE_SIZE - 1);
             let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
             
             for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
-                // Clean data cache line by address
                 core::ptr::write_volatile(SCB_DCCMVAC, line_addr as u32);
             }
             
@@ -195,18 +189,13 @@ pub mod cache_ops {
         }
     }
     
-    /// Invalidate data cache by address range
-    /// 
-    /// Use after DMA write operations to ensure CPU sees new data.
     pub fn invalidate_dcache(addr: usize, size: usize) {
         unsafe {
             dsb(); // Ensure all previous operations complete
-            
             let start = addr & !(DCACHE_LINE_SIZE - 1);
             let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
             
             for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
-                // Invalidate data cache line by address
                 core::ptr::write_volatile(SCB_DCIMVAC, line_addr as u32);
             }
             
@@ -215,18 +204,13 @@ pub mod cache_ops {
         }
     }
     
-    /// Clean and invalidate data cache by address range
-    /// 
-    /// Use for bidirectional DMA operations.
     pub fn clean_invalidate_dcache(addr: usize, size: usize) {
         unsafe {
             dsb(); // Ensure all previous operations complete
-            
             let start = addr & !(DCACHE_LINE_SIZE - 1);
             let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
             
             for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
-                // Clean and invalidate data cache line by address
                 core::ptr::write_volatile(SCB_DCCIMVAC, line_addr as u32);
             }
             
@@ -235,13 +219,11 @@ pub mod cache_ops {
         }
     }
     
-    /// Prepare DMA buffer for device access (CPU -> Device)
     #[inline]
     pub fn prepare_for_dma_write(buffer: &[u8]) {
         clean_dcache(buffer.as_ptr() as usize, buffer.len());
     }
     
-    /// Prepare DMA buffer for CPU access (Device -> CPU)
     #[inline]
     pub fn prepare_for_dma_read(buffer: &mut [u8]) {
         invalidate_dcache(buffer.as_ptr() as usize, buffer.len());
@@ -282,21 +264,63 @@ impl DmaBufferPool {
                 
                 let ptr = unsafe { NonNull::new_unchecked(addr) };
                 
-                return Ok(DmaBuffer {
+                let buffer = DmaBuffer {
                     ptr,
                     size,
                     pool_index: i,
-                });
+                };
+                
+                // Store buffer in tracking vec
+                if self.buffers.push(buffer).is_err() {
+                    // Reset allocation on failure
+                    allocated.store(false, Ordering::Release);
+                    return Err(UsbError::NoResources);
+                }
+                
+                // Return copy of the buffer
+                return Ok(buffer);
             }
         }
         
         Err(UsbError::NoResources)
     }
     
+    /// Get all allocated buffers for inspection
+    pub fn get_allocated_buffers(&self) -> &[DmaBuffer] {
+        &self.buffers
+    }
+    
+    /// Get buffer statistics
+    pub fn buffer_stats(&self) -> BufferStats {
+        let allocated_count = self.allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
+        BufferStats {
+            total_buffers: 32,
+            allocated_buffers: allocated_count,
+            free_buffers: 32 - allocated_count,
+        }
+    }
+    
     /// Free a DMA buffer back to the pool
     pub fn free(&mut self, buffer: DmaBuffer) {
+        // Find and remove buffer from tracking vec
+        if let Some(pos) = self.buffers.iter().position(|b| b.pool_index == buffer.pool_index) {
+            self.buffers.swap_remove(pos);
+        }
+        
+        // Mark buffer as free
         self.allocated[buffer.pool_index].store(false, Ordering::Release);
     }
+}
+
+/// Buffer pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct BufferStats {
+    /// Total number of buffers in pool
+    pub total_buffers: usize,
+    /// Number of currently allocated buffers
+    pub allocated_buffers: usize,
+    /// Number of free buffers
+    pub free_buffers: usize,
 }
 
 /// Ensure a value is aligned to DMA requirements

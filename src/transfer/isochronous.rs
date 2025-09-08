@@ -43,7 +43,23 @@ impl MicroframeTiming {
         }
     }
     
-    /// Create timing for double transaction per microframe (high-speed only)
+    /// Create timing for multiple transactions per microframe
+    pub const fn multiple(transactions: u8, additional: u8) -> Self {
+        let limited_transactions = if transactions > 3 { 3 } else { transactions };
+        Self {
+            transactions_per_uframe: limited_transactions,
+            additional_opportunities: additional,
+        }
+    }
+    
+    pub fn additional_opportunities(&self) -> u8 {
+        self.additional_opportunities
+    }
+    
+    pub fn total_bandwidth_slots(&self) -> u8 {
+        self.transactions_per_uframe + self.additional_opportunities
+    }
+    
     pub const fn double() -> Self {
         Self {
             transactions_per_uframe: 2,
@@ -206,6 +222,22 @@ impl IsochronousTransfer {
         );
         
         Ok(())
+    }
+    
+    /// Get polling interval in frames
+    pub fn interval_frames(&self) -> u8 {
+        self.interval_frames
+    }
+    
+    /// Calculate next frame based on interval
+    pub fn calculate_next_frame(&self, current_frame: u32) -> u32 {
+        current_frame + (self.interval_frames as u32)
+    }
+    
+    /// Check if transfer should be scheduled in this frame
+    pub fn should_schedule_in_frame(&self, frame_number: u32) -> bool {
+        let expected_frame = self.next_frame.load(Ordering::Relaxed);
+        frame_number >= expected_frame
     }
     
     /// Start isochronous transfer when scheduled frame arrives

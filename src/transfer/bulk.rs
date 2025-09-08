@@ -1,12 +1,21 @@
 //! USB Bulk transfer implementation
-//! 
-//! Implements USB 2.0 bulk transfers for high-throughput data exchange
-//! with MIDI keyboards, mass storage devices, and other bulk endpoints.
 
 use crate::error::{Result, UsbError};
 use crate::dma::{QhHandle, QtdHandle, DescriptorAllocator, DmaBuffer, cache_ops};
 use crate::transfer::Direction;
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+
+fn get_current_tick_count() -> u32 {
+    unsafe {
+        let dwt = cortex_m::peripheral::DWT::PTR;
+        (*dwt).cyccnt.read()
+    }
+}
+
+fn ticks_to_ms(ticks: u32) -> u32 {
+    const CPU_FREQ_MHZ: u32 = 600;
+    ticks / (CPU_FREQ_MHZ * 1000)
+}
 
 /// Bulk transfer states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,9 +144,44 @@ impl BulkTransfer {
         
         // Start transfer
         self.transition_state(BulkState::Active);
+        self.start_transfer_timer();
         self.execute_transfer(allocator)?;
         
         Ok(())
+    }
+    
+    /// Start transfer timer for timeout tracking
+    fn start_transfer_timer(&self) {
+        // Use a simple tick counter (implementation-specific)
+        // In real implementation, this would use a hardware timer
+        let current_time = get_current_tick_count();
+        self.start_time.store(current_time, Ordering::Relaxed);
+    }
+    
+    /// Check if transfer has timed out
+    pub fn is_timed_out(&self) -> bool {
+        if self.timeout_ms == 0 {
+            return false; // No timeout set
+        }
+        
+        let start = self.start_time.load(Ordering::Relaxed);
+        if start == 0 {
+            return false; // Transfer not started
+        }
+        
+        let current = get_current_tick_count();
+        let elapsed_ms = ticks_to_ms(current.saturating_sub(start));
+        elapsed_ms >= self.timeout_ms
+    }
+    
+    /// Get timeout configuration
+    pub fn timeout_ms(&self) -> u32 {
+        self.timeout_ms
+    }
+    
+    /// Set timeout for transfer
+    pub fn set_timeout(&mut self, timeout_ms: u32) {
+        self.timeout_ms = timeout_ms;
     }
     
     /// Execute the bulk transfer
@@ -573,6 +617,11 @@ impl BulkTransferStats {
     
     fn record_stall(&self) {
         self.stalls.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    /// Record a STALL condition
+    pub fn handle_stall(&self) {
+        self.record_stall();
     }
     
     /// Record bytes transferred

@@ -1,6 +1,4 @@
 //! USB Control transfer state machine implementation
-//! 
-//! Implements USB 2.0 control transfers with proper state management
 
 use crate::error::{Result, UsbError};
 use crate::dma::{QhHandle, QtdHandle, DescriptorAllocator};
@@ -96,6 +94,7 @@ pub struct ControlTransfer {
     /// Setup packet
     setup_packet: SetupPacket,
     /// Data buffer for IN/OUT transfers
+    #[allow(dead_code)]
     data_buffer: Option<&'static mut [u8]>,
     /// Bytes transferred so far
     bytes_transferred: AtomicU32,
@@ -110,8 +109,10 @@ pub struct ControlTransfer {
     /// Current qTD handle
     qtd_handle: Option<QtdHandle>,
     /// Device address
+    #[allow(dead_code)]
     device_address: u8,
     /// Endpoint number (usually 0 for control)
+    #[allow(dead_code)]
     endpoint: u8,
     /// Maximum packet size
     max_packet_size: u16,
