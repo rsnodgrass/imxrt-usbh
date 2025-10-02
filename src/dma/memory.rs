@@ -104,7 +104,10 @@ impl UsbMemoryPool {
 static mut BUFFER_POOL: [[u8; 512]; 32] = [[0; 512]; 32];
 
 /// DMA buffer handle
-#[derive(Debug, Clone, Copy)]
+///
+/// NOT Copy/Clone - must be explicitly freed to prevent aliasing.
+/// Represents unique ownership of a DMA buffer slot.
+#[derive(Debug)]
 pub struct DmaBuffer {
     /// Pointer to buffer data
     pub ptr: *mut u8,

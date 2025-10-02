@@ -185,7 +185,9 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
 }
 
 /// DMA buffer allocation handle
-#[derive(Clone, Copy)]
+///
+/// NOT Copy/Clone - ensures single ownership and prevents aliasing.
+/// Buffer is automatically returned to pool when dropped.
 pub struct DmaBuffer {
     ptr: NonNull<u8>,
     size: usize,
@@ -292,7 +294,6 @@ pub mod cache_ops {
 
 /// DMA buffer pool for allocation management
 pub struct DmaBufferPool {
-    buffers: heapless::Vec<DmaBuffer, 32>,
     allocated: [AtomicBool; 32],
 }
 
@@ -301,7 +302,6 @@ impl DmaBufferPool {
     pub const fn new() -> Self {
         const ATOMIC_BOOL_FALSE: AtomicBool = AtomicBool::new(false);
         Self {
-            buffers: heapless::Vec::new(),
             allocated: [ATOMIC_BOOL_FALSE; 32],
         }
     }
@@ -329,25 +329,15 @@ impl DmaBufferPool {
                     size,
                     pool_index: i,
                 };
-                
-                // Store buffer in tracking vec
-                if self.buffers.push(buffer).is_err() {
-                    // Reset allocation on failure
-                    allocated.store(false, Ordering::Release);
-                    return Err(UsbError::NoResources);
-                }
-                
-                // Return copy of the buffer
+
+                // Return the buffer (no Copy, ensures single ownership)
+                // IMPORTANT: Buffer must be manually freed with pool.free(buffer)
+                // Dropping without freeing will leak the buffer slot
                 return Ok(buffer);
             }
         }
         
         Err(UsbError::NoResources)
-    }
-    
-    /// Get all allocated buffers for inspection
-    pub fn get_allocated_buffers(&self) -> &[DmaBuffer] {
-        &self.buffers
     }
     
     /// Get buffer statistics
@@ -361,14 +351,14 @@ impl DmaBufferPool {
     }
     
     /// Free a DMA buffer back to the pool
+    ///
+    /// # Safety
+    /// Buffer must not be used after being freed. The lack of Copy trait
+    /// helps prevent this, but care must be taken not to hold references.
     pub fn free(&mut self, buffer: DmaBuffer) {
-        // Find and remove buffer from tracking vec
-        if let Some(pos) = self.buffers.iter().position(|b| b.pool_index == buffer.pool_index) {
-            self.buffers.swap_remove(pos);
-        }
-        
         // Mark buffer as free
         self.allocated[buffer.pool_index].store(false, Ordering::Release);
+        // Buffer is consumed (moved) here, preventing further use
     }
 }
 
