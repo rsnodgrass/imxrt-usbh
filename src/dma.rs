@@ -22,93 +22,153 @@ pub const DMA_ALIGNMENT: usize = 32;
 pub const MAX_DMA_BUFFER_SIZE: usize = 20 * 1024;
 
 /// DMA-safe memory region in non-cacheable RAM
-/// 
-/// Place this in DTCM or OCRAM2 which are not cached by default
-/// Note: link_section attribute removed for compilation compatibility
-#[repr(C, align(4096))]
-pub struct DmaRegion {
-    /// Queue Head pool
-    pub qh_pool: [u8; 64 * 64],  // 64 QHs, 64 bytes each
-    /// Queue Transfer Descriptor pool  
-    pub qtd_pool: [u8; 256 * 32], // 256 qTDs, 32 bytes each
-    /// Data buffers for transfers
-    pub data_buffers: [[u8; 512]; 32], // 32 buffers of 512 bytes
+///
+/// **CRITICAL**: Must be placed in OCRAM (non-cacheable) memory region.
+/// Configure linker script to place `.ocram` section at OCRAM base address.
+///
+/// For Teensy 4.1 (i.MX RT1062):
+/// - OCRAM: 0x20200000 - 0x2027FFFF (512KB)
+/// - DTCM:  0x20000000 - 0x2001FFFF (128KB, tightly coupled)
+///
+/// Add to linker script (.ld file):
+/// ```
+/// .ocram (NOLOAD) : {
+///     *(.ocram .ocram.*)
+/// } > OCRAM
+/// ```
+/// Cache-line aligned buffer for DMA operations
+/// Ensures no partial cache line issues on Cortex-M7 (32-byte cache lines)
+#[repr(C, align(32))]
+pub struct CacheAlignedBuffer([u8; 512]);
+
+impl CacheAlignedBuffer {
+    const fn new() -> Self {
+        Self([0; 512])
+    }
+
+    /// Get pointer to buffer data
+    pub fn as_ptr(&self) -> *const u8 {
+        self.0.as_ptr()
+    }
+
+    /// Get mutable pointer to buffer data
+    pub fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.0.as_mut_ptr()
+    }
 }
 
-/// Static DMA region instance
+#[repr(C, align(4096))]
+pub struct DmaRegion {
+    /// Queue Head pool (aligned to 64 bytes per EHCI spec)
+    pub qh_pool: [u8; 64 * 64],  // 64 QHs, 64 bytes each
+    /// Queue Transfer Descriptor pool (aligned to 32 bytes per EHCI spec)
+    pub qtd_pool: [u8; 256 * 32], // 256 qTDs, 32 bytes each
+    /// Data buffers for transfers (cache-line aligned)
+    pub data_buffers: [CacheAlignedBuffer; 32], // 32 buffers of 512 bytes each
+}
+
+/// Static DMA region instance - will be placed in OCRAM by linker
+#[link_section = ".ocram"]
 static mut DMA_REGION: DmaRegion = DmaRegion {
     qh_pool: [0; 64 * 64],
     qtd_pool: [0; 256 * 32],
-    data_buffers: [[0; 512]; 32],
+    data_buffers: [
+        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
+    ],
 };
 
 /// DMA region initialization flag
 static DMA_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+/// Compile-time assertions for DMA buffer alignment
+const _: () = {
+    const DCACHE_LINE_SIZE: usize = 32;
+    // Ensure CacheAlignedBuffer is properly aligned
+    assert!(core::mem::align_of::<CacheAlignedBuffer>() == DCACHE_LINE_SIZE);
+    // Ensure buffer size is multiple of cache line
+    assert!(512 % DCACHE_LINE_SIZE == 0);
+};
+
 /// Initialize DMA region with MPU configuration
-/// 
-/// Configures the MPU to mark DMA region as non-cacheable Device memory.
+///
+/// Configures the MPU to mark DMA region as non-cacheable Normal memory.
 /// This ensures cache coherency for DMA operations.
-/// 
+///
 /// # Safety
-/// 
+///
 /// Must be called once during system initialization before any DMA operations.
 pub unsafe fn init_dma_region() -> Result<()> {
     if DMA_INITIALIZED.swap(true, Ordering::Acquire) {
         return Err(UsbError::AlreadyInitialized);
     }
-    
+
     // Get DMA region address
     let region_addr = &raw const DMA_REGION as usize;
     let region_size = size_of::<DmaRegion>();
-    
-    // Validate region bounds
+
+    // Validate region bounds and alignment
     crate::safety::BoundsChecker::validate_alignment(region_addr, DMA_ALIGNMENT)?;
-    
+
+    // Validate cache line alignment for data buffers
+    unsafe {
+        let buffer_addr = &raw const DMA_REGION.data_buffers as usize;
+        const DCACHE_LINE_SIZE: usize = 32;
+        if buffer_addr % DCACHE_LINE_SIZE != 0 {
+            return Err(UsbError::InvalidParameter);
+        }
+    }
+
     // Configure MPU for non-cacheable DMA region
     unsafe {
         configure_mpu_dma_region(region_addr, region_size)?;
     }
-    
+
     Ok(())
 }
 
 /// Configure MPU for DMA region
-/// 
-/// Sets up MPU region 7 as Device memory for DMA buffers.
-/// Reference: ARM Cortex-M7 Generic User Guide, Section 2.3
+///
+/// Sets up MPU region 7 as Normal Non-cacheable Shareable memory for DMA buffers.
+/// Reference: ARM Cortex-M7 TRM Table 4-3 (Memory Type Encoding)
 unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
     use cortex_m::peripheral::MPU;
-    
+
     const MPU_CTRL_ENABLE: u32 = 0x01;
     const MPU_CTRL_PRIVDEFENA: u32 = 0x04;
-    
+
     const MPU_RASR_ENABLE: u32 = 0x01;
-    const MPU_RASR_SIZE_16KB: u32 = 13 << 1;  // 2^(13+1) = 16KB
-    const MPU_RASR_AP_RW: u32 = 0b011 << 24;   // Read/Write access
-    const MPU_RASR_TEX_DEVICE: u32 = 0b000 << 19; // Device memory
+    const MPU_RASR_SIZE_32KB: u32 = 14 << 1;  // 2^(14+1) = 32KB (covers 28KB DMA region)
+    const MPU_RASR_AP_RW: u32 = 0b011 << 24;  // Read/Write access
+    const MPU_RASR_TEX_NORMAL: u32 = 0b001 << 19; // Normal memory (not Device)
     const MPU_RASR_SHAREABLE: u32 = 1 << 18;
-    const MPU_RASR_BUFFERABLE: u32 = 1 << 16;
-    const MPU_RASR_XN: u32 = 1 << 28;          // Execute never
-    
+    // C=0, B=0 for non-cacheable (do not set CACHEABLE or BUFFERABLE bits)
+    const MPU_RASR_XN: u32 = 1 << 28;  // Execute never
+
     // Disable MPU during configuration
     unsafe {
         let mpu = &*cortex_m::peripheral::MPU::PTR;
         mpu.ctrl.write(0); // Disable MPU
     }
-    
+
     // Configure region 7 for DMA
     unsafe {
         (*MPU::PTR).rnr.write(7);  // Select region 7
         (*MPU::PTR).rbar.write(addr as u32 & !0x1F); // Base address (32-byte aligned)
         (*MPU::PTR).rasr.write(
             MPU_RASR_ENABLE |
-            MPU_RASR_SIZE_16KB |
+            MPU_RASR_SIZE_32KB |
             MPU_RASR_AP_RW |
-            MPU_RASR_TEX_DEVICE |
+            MPU_RASR_TEX_NORMAL |  // Normal Non-cacheable
             MPU_RASR_SHAREABLE |
-            MPU_RASR_BUFFERABLE |
             MPU_RASR_XN
+            // Note: C=0, B=0 (non-cacheable) - do not include BUFFERABLE
         );
     }
     
@@ -256,7 +316,7 @@ impl DmaBufferPool {
         for (i, allocated) in self.allocated.iter().enumerate() {
             if !allocated.swap(true, Ordering::Acquire) {
                 // Buffer was free, now allocated
-                let addr = unsafe { &DMA_REGION.data_buffers[i][0] as *const u8 as *mut u8 };
+                let addr = unsafe { DMA_REGION.data_buffers[i].as_ptr() as *mut u8 };
                 
                 // Validate buffer bounds
                 crate::safety::BoundsChecker::validate_buffer(addr, size)?;
