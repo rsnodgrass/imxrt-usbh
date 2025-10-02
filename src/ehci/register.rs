@@ -1,5 +1,5 @@
 //! Optimized register access patterns for EHCI
-//! 
+//!
 //! Implements efficient, cache-friendly register access with proper memory ordering
 //! for ARM Cortex-M7 weakly-ordered memory model.
 
@@ -96,7 +96,8 @@ pub struct RegisterTimeout {
 impl RegisterTimeout {
     /// Create new timeout with duration in microseconds
     pub fn new_us(timeout_us: u32) -> Self {
-        let cycles_per_us = cortex_m::peripheral::DWT::cycle_count() / 1_000_000;
+        // Use shared CPU frequency constant
+        let cycles_per_us = crate::CPU_FREQ_MHZ;
         Self {
             start_cycles: cortex_m::peripheral::DWT::cycle_count(),
             timeout_cycles: timeout_us * cycles_per_us,

@@ -95,8 +95,8 @@ fn main() -> ! {
 
     let _controller = unsafe {
         // Using USB2 EHCI controller (USB Host port on Teensy 4.1)
-        // 0x402E_0400: USB2 EHCI register base
-        match EhciController::<8, Uninitialized>::new(0x402E_0400) {
+        // 0x402E_0200: USB2 EHCI register base (per i.MX RT1060 RM Section 2.1.2)
+        match EhciController::<8, Uninitialized>::new(0x402E_0200) {
             Ok(controller) => {
                 info!("✓ EHCI controller created successfully!");
                 poller.poll();

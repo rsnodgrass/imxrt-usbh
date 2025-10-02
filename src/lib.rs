@@ -27,6 +27,10 @@
 #[cfg(feature = "defmt")]
 use defmt as _;
 
+/// CPU frequency for i.MX RT1062 (Teensy 4.x) in MHz
+/// Default is 600MHz. Override with compile-time configuration if needed.
+pub const CPU_FREQ_MHZ: u32 = 600;
+
 pub mod ehci;
 pub mod phy;
 pub mod dma;

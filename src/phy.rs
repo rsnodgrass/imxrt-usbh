@@ -15,6 +15,7 @@ const USB1_PLL_ENABLE: u32 = 1 << 13;
 const USB1_PLL_POWER: u32 = 1 << 12;
 const USB1_PLL_EN_USB_CLKS: u32 = 1 << 6;
 const USB1_PLL_LOCK: u32 = 1 << 31;
+const USB1_PLL_BYPASS: u32 = 1 << 16;  // Bypass bit per RM 14.5.3
 
 /// Hardware timing constants per i.MX RT reference manual
 mod timing {
@@ -29,6 +30,14 @@ mod timing {
     /// USB PHY calibration timeout (5ms max per RM 66.5.1.5)
     pub const PHY_CALIBRATION_TIMEOUT_US: u32 = 5_000;
 }
+
+/// USBPHY register offsets per RM 66.6
+const USBPHY_PWD_OFFSET: usize = 0x00;     // Power-Down register
+const USBPHY_TX_OFFSET: usize = 0x10;      // TX register
+const USBPHY_RX_OFFSET: usize = 0x20;      // RX register
+const USBPHY_CTRL_OFFSET: usize = 0x30;    // Control register
+const USBPHY_CTRL_SET_OFFSET: usize = 0x34;
+const USBPHY_CTRL_CLR_OFFSET: usize = 0x38;
 
 /// PHY control bits per RM 66.6.33
 const USBPHY_CTRL_SFTRST: u32 = 1 << 31;
@@ -99,45 +108,48 @@ impl UsbPhy {
     fn reset_phy(&mut self) -> Result<()> {
         // Assert soft reset (RM 66.5.1.2 step 1)
         unsafe {
-            let ctrl_reg = (self.phy_base + 0x00) as *mut u32;
+            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
             ctrl |= USBPHY_CTRL_SFTRST;
             core::ptr::write_volatile(ctrl_reg, ctrl);
         }
-        
+
         // Hold reset for minimum time (RM timing requirement)
         self.delay_us(timing::PHY_RESET_HOLD_TIME_US);
-        
+
         // Deassert soft reset and clock gate
         unsafe {
-            let ctrl_reg = (self.phy_base + 0x00) as *mut u32;
+            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
             ctrl &= !(USBPHY_CTRL_SFTRST | USBPHY_CTRL_CLKGATE);
             core::ptr::write_volatile(ctrl_reg, ctrl);
         }
-        
+
         // Wait for PHY to stabilize
         self.delay_us(timing::PHY_POWER_STABILIZATION_US);
-        
+
         Ok(())
     }
     
     /// Initialize USB PLL with hardware timing verification
     fn init_usb_pll(&mut self) -> Result<()> {
-        // Enable USB1 PLL (RM 14.5.3)
+        // Step 1: Set bypass and configure PLL (RM 14.5.3)
         unsafe {
             let pll_reg = (self.ccm_base + 0x10) as *mut u32;
             let mut pll = core::ptr::read_volatile(pll_reg);
-            
+
+            // Set bypass before modifying PLL configuration (RM requirement)
+            pll |= USB1_PLL_BYPASS;
+
             // Configure divider and enable PLL
             pll &= !0x3F; // Clear divider field
             pll |= USB1_PLL_DIV_SELECT & 0x3F;
             pll |= USB1_PLL_ENABLE | USB1_PLL_POWER;
-            
+
             core::ptr::write_volatile(pll_reg, pll);
         }
-        
-        // Wait for PLL lock with timeout (RM 14.5.3)
+
+        // Step 2: Wait for PLL lock with timeout (RM 14.5.3)
         let timeout = RegisterTimeout::new_us(timing::PLL_LOCK_TIMEOUT_US);
         timeout.wait_for(|| {
             unsafe {
@@ -146,19 +158,20 @@ impl UsbPhy {
                 (pll & USB1_PLL_LOCK) != 0
             }
         }).map_err(|_| UsbError::HardwareFailure)?;
-        
-        // Enable USB clocks after lock
+
+        // Step 3: Clear bypass after lock confirmed (RM requirement)
         unsafe {
             let pll_reg = (self.ccm_base + 0x10) as *mut u32;
             let mut pll = core::ptr::read_volatile(pll_reg);
+            pll &= !USB1_PLL_BYPASS;
             pll |= USB1_PLL_EN_USB_CLKS;
             core::ptr::write_volatile(pll_reg, pll);
         }
-        
+
         // Wait for clock stabilization
         self.delay_us(timing::CLOCK_STABILIZATION_US);
         self.pll_locked.store(true, Ordering::Release);
-        
+
         Ok(())
     }
     
@@ -186,16 +199,16 @@ impl UsbPhy {
     /// Configure PHY for host mode operation
     fn configure_host_mode(&mut self) -> Result<()> {
         unsafe {
-            let ctrl_reg = (self.phy_base + 0x00) as *mut u32;
+            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
-            
+
             // Enable host mode features
             ctrl |= USBPHY_CTRL_ENHOSTDISCONDETECT;
             ctrl |= USBPHY_CTRL_HOSTDISCONDETECT_IRQ;
-            
+
             core::ptr::write_volatile(ctrl_reg, ctrl);
         }
-        
+
         Ok(())
     }
     
@@ -203,22 +216,22 @@ impl UsbPhy {
     fn calibrate_phy(&mut self) -> Result<()> {
         // Start calibration sequence (RM 66.5.1.5)
         unsafe {
-            let ctrl_reg = (self.phy_base + 0x00) as *mut u32;
+            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
             ctrl |= 1 << 16; // Start calibration
             core::ptr::write_volatile(ctrl_reg, ctrl);
         }
-        
+
         // Wait for calibration completion
         let timeout = RegisterTimeout::new_us(timing::PHY_CALIBRATION_TIMEOUT_US);
         timeout.wait_for(|| {
             unsafe {
-                let ctrl_reg = (self.phy_base + 0x00) as *const u32;
+                let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
                 let ctrl = core::ptr::read_volatile(ctrl_reg);
                 (ctrl & (1 << 17)) != 0 // Calibration done
             }
         }).map_err(|_| UsbError::HardwareFailure)?;
-        
+
         self.calibrated.store(true, Ordering::Release);
         Ok(())
     }
@@ -226,7 +239,7 @@ impl UsbPhy {
     /// Enable host disconnect detection with debouncing
     fn enable_host_disconnect_detect(&mut self) {
         unsafe {
-            let ctrl_reg = (self.phy_base + 0x00) as *mut u32;
+            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
             ctrl |= USBPHY_CTRL_ENHOSTDISCONDETECT;
             core::ptr::write_volatile(ctrl_reg, ctrl);
@@ -235,29 +248,24 @@ impl UsbPhy {
     
     /// Verify PHY is responding to register accesses
     fn verify_phy_response(&mut self) -> Result<()> {
-        // Write test pattern and verify readback
+        // Read CTRL register to verify PHY is accessible
+        // (No test register exists in USBPHY per RM 66.6)
         unsafe {
-            let test_reg = (self.phy_base + 0x08) as *mut u32; // Debug register
-            let test_pattern = 0x5A5A5A5A;
-            
-            core::ptr::write_volatile(test_reg, test_pattern);
-            let readback = core::ptr::read_volatile(test_reg);
-            
-            if readback != test_pattern {
-                return Err(UsbError::HardwareFailure);
-            }
+            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
+            let _ctrl = core::ptr::read_volatile(ctrl_reg);
+            // If read succeeds without bus fault, PHY is responding
         }
-        
+
         Ok(())
     }
     
     /// Hardware-specific microsecond delay implementation
     #[inline(always)]
     fn delay_us(&self, us: u32) {
-        // Use DWT cycle counter for precise timing (assuming 600MHz CPU)
+        // Use DWT cycle counter for precise timing
         let start_cycles = cortex_m::peripheral::DWT::cycle_count();
-        let target_cycles = us * 600; // 600 cycles per μs at 600MHz
-        
+        let target_cycles = us * crate::CPU_FREQ_MHZ;
+
         while cortex_m::peripheral::DWT::cycle_count().wrapping_sub(start_cycles) < target_cycles {
             cortex_m::asm::nop();
         }

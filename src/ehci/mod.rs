@@ -266,7 +266,8 @@ impl IsTrue for Assert<true> {}
 pub const USB1_BASE: usize = 0x402E_0000;
 
 /// Base address for USB2 EHCI controller on i.MX RT1062
-pub const USB2_BASE: usize = 0x402E_0400;
+/// Per i.MX RT1060 Reference Manual Section 2.1.2: USB OTG2 base is 0x402E_0200
+pub const USB2_BASE: usize = 0x402E_0200;
 
 
 /// Port speed detection
