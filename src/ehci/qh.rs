@@ -218,20 +218,22 @@ impl QueueHead {
     }
     
     /// Link a qTD to this Queue Head
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// The qTD must remain valid and properly aligned for DMA access.
-    pub unsafe fn link_qtd(&self, qtd_addr: u32) {
+    pub unsafe fn link_qtd(&self, qtd_addr: u32) -> Result<()> {
         if qtd_addr & 0x1F != 0 {
-            panic!("qTD address not 32-byte aligned");
+            return Err(UsbError::InvalidParameter);
         }
-        
+
         // Set next qTD in overlay area
         self.next_qtd.store(qtd_addr, Ordering::Release);
-        
+
         // Clear current qTD to trigger fetch of next qTD
         self.current_qtd.store(0, Ordering::Release);
+
+        Ok(())
     }
     
     /// Check if Queue Head is active

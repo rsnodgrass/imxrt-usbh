@@ -51,7 +51,13 @@ impl PerfCounters {
     pub fn record_transfer_success(&self, bytes: usize) {
         self.transfers_total.fetch_add(1, Ordering::Relaxed);
         self.transfers_success.fetch_add(1, Ordering::Relaxed);
-        self.bytes_transferred.fetch_add(bytes as u32, Ordering::Relaxed);
+
+        // Use saturating add to prevent silent overflow
+        let _ = self.bytes_transferred.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |current| current.checked_add(bytes as u32).or(Some(u32::MAX))
+        );
     }
     
     /// Record a failed transfer
