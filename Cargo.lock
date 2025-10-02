@@ -162,16 +162,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "defmt-rtt"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6eca0aae8aa2cf8333200ecbd236274697bc0a394765c858b3d9372eb1abcfa"
-dependencies = [
- "critical-section",
- "defmt 0.3.100",
-]
-
-[[package]]
 name = "embedded-hal"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -463,7 +453,6 @@ dependencies = [
  "cortex-m-rt",
  "critical-section",
  "defmt 0.3.100",
- "defmt-rtt",
  "embedded-hal 1.0.0",
  "embedded-hal-nb",
  "heapless",
