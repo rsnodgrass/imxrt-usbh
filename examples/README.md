@@ -4,6 +4,23 @@ This directory contains comprehensive examples demonstrating different aspects o
 
 NOTE: For simplicity, these education examples do not currently use RTIC, even though underlying `imxrt-usbh` is RTIC based.
 
+## Serial Output for USB Host Examples
+
+**Why UART (pins 0/1) instead of USB CDC?**
+
+These examples use UART serial output on pins 0/1 rather than USB CDC (the main USB port) because:
+
+- The USB1 port is configured as a **USB host** to connect keyboards, MIDI devices, etc.
+- A USB port cannot be both host and device simultaneously
+- Using UART allows you to see debug output while the USB port acts as a host
+
+**Hardware setup:**
+- Connect a USB-to-serial adapter to pins 0 (RX) and 1 (TX)
+- Or use the built-in USB-to-serial on some development boards
+- Open serial monitor at 115200 baud
+
+**Note:** Teensy 4.1 has a second USB port (USB2) that could theoretically be used for CDC output while USB1 is a host, but these examples prioritize simplicity and compatibility with both Teensy 4.0 and 4.1.
+
 ## Getting Started Examples
 
 ### `01_basic_host_init.rs` - USB PHY Initialization
