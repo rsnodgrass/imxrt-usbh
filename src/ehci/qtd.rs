@@ -3,7 +3,6 @@
 //! Based on EHCI Specification Section 3.5
 
 use core::sync::atomic::{AtomicU32, Ordering};
-use core::marker::PhantomData;
 use crate::error::{Result, UsbError};
 use crate::dma::is_dma_aligned;
 
