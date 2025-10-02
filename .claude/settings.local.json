@@ -4,7 +4,15 @@
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
       "Bash(cargo search:*)",
-      "Bash(cargo show:*)"
+      "Bash(cargo show:*)",
+      "Bash(cargo test:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(cargo clean:*)",
+      "Bash(mv:*)",
+      "Bash(git add:*)",
+      "Read(//Users/ryan/Sync/Code/acertain/**)",
+      "Read(//Users/ryan/**)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

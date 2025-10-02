@@ -271,6 +271,7 @@ pub const USB2_BASE: usize = 0x402E_0400;
 
 /// Port speed detection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(missing_docs)]
 pub enum PortSpeed {
     FullSpeed,   // 12 Mbps
     LowSpeed,    // 1.5 Mbps
@@ -280,6 +281,7 @@ pub enum PortSpeed {
 
 /// USB line state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(missing_docs)]
 pub enum LineState {
     SE0,      // Single-ended zero
     JState,   // J-state
@@ -328,6 +330,7 @@ pub struct EhciOperationalRegisters {
 bitflags! {
     /// USB Command Register (USBCMD) bit definitions
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[allow(missing_docs)]
     pub struct UsbCmd: u32 {
         /// Run/Stop (RS) - Bit 0
         const RUN_STOP = 1 << 0;
@@ -404,6 +407,7 @@ bitflags! {
 bitflags! {
     /// Port Status and Control Register (PORTSC) bit definitions
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[allow(missing_docs)]
     pub struct PortSc: u32 {
         /// Current Connect Status (CCS) - Bit 0
         const CURRENT_CONNECT_STATUS = 1 << 0;

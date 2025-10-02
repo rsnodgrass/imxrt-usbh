@@ -7,6 +7,7 @@ use crate::error::{Result, UsbError};
 use crate::dma::is_dma_aligned;
 
 /// qTD token field bit definitions
+#[allow(missing_docs)]
 pub mod token {
     pub const STATUS_ACTIVE: u32 = 1 << 7;
     pub const STATUS_HALTED: u32 = 1 << 6;

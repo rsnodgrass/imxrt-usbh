@@ -59,6 +59,7 @@ pub struct DmaBuffer {
     /// Buffer size class
     size_class: BufferSize,
     /// Pool index for recycling
+    #[allow(dead_code)]
     pool_index: u16,
     /// Currently allocated
     allocated: AtomicBool,
@@ -579,6 +580,7 @@ impl BufferPoolStats {
 /// Statistics snapshot for buffer pool
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[allow(missing_docs)]
 pub struct BufferPoolStatsSnapshot {
     pub tiny: SizeClassStats,
     pub small: SizeClassStats,
@@ -590,6 +592,7 @@ pub struct BufferPoolStatsSnapshot {
 /// Statistics for a single size class
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[allow(missing_docs)]
 pub struct SizeClassStats {
     pub allocations: u32,
     pub frees: u32,

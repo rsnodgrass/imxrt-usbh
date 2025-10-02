@@ -26,8 +26,6 @@ use panic_halt as _;
 use cortex_m_rt::entry;
 use imxrt_usbh::phy::UsbPhy;
 
-#[cfg(feature = "defmt")]
-use defmt_rtt as _;
 
 #[entry]
 fn main() -> ! {

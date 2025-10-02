@@ -34,7 +34,6 @@ tracing = { version = "0.1", default-features = false, optional = true }
 
 [dev-dependencies]
 panic-halt = "1.0"
-defmt-rtt = "0.4"
 cortex-m-rt = "0.7"
 rtic = { version = "2.0", features = ["thumbv7-backend"] }
 rtic-monotonics = { version = "1.5", features = ["cortex-m-systick"] }

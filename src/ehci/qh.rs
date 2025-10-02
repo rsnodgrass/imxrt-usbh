@@ -6,6 +6,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::error::{Result, UsbError};
 
 /// Endpoint characteristics field bits
+#[allow(missing_docs)]
 pub mod endpoint {
     pub const DEVICE_ADDRESS_SHIFT: u32 = 0;
     pub const DEVICE_ADDRESS_MASK: u32 = 0x7F;
@@ -95,9 +96,13 @@ pub struct QueueHead {
 
 impl QueueHead {
     /// Type field values for horizontal link
+    #[allow(missing_docs)]
     pub const TYPE_ITD: u32 = 0 << 1;
+    #[allow(missing_docs)]
     pub const TYPE_QH: u32 = 1 << 1;
+    #[allow(missing_docs)]
     pub const TYPE_SITD: u32 = 2 << 1;
+    #[allow(missing_docs)]
     pub const TYPE_FSTN: u32 = 3 << 1;
     
     /// Terminator bit

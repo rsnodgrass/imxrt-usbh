@@ -291,7 +291,7 @@ pub unsafe fn init_safety_monitoring(stack_base: u32, stack_size: u32) {
         STACK_MONITOR.stack_size = stack_size;
         
         // Initialize stack canary
-        STACK_MONITOR.init_canary();
+        (*core::ptr::addr_of_mut!(STACK_MONITOR)).init_canary();
     }
     
     // Enable DWT cycle counter for timing
@@ -309,7 +309,7 @@ pub unsafe fn init_safety_monitoring(stack_base: u32, stack_size: u32) {
 pub fn check_safety() -> bool {
     unsafe {
         // Check stack overflow
-        if STACK_MONITOR.check_stack() {
+        if (*core::ptr::addr_of!(STACK_MONITOR)).check_stack() {
             return false;
         }
         

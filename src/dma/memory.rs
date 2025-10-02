@@ -79,7 +79,7 @@ impl UsbMemoryPool {
     /// Free DMA buffer
     pub fn free_buffer(&mut self, buffer: DmaBuffer) -> Result<()> {
         let buffer_addr = buffer.ptr as usize;
-        let pool_start = unsafe { BUFFER_POOL.as_ptr() as usize };
+        let pool_start = core::ptr::addr_of!(BUFFER_POOL) as usize;
         let index = (buffer_addr - pool_start) / 512;
         
         if index >= 32 {

@@ -114,6 +114,7 @@ impl PerfCounters {
 
 /// Immutable snapshot of performance counters
 #[derive(Debug, Clone, Copy)]
+#[allow(missing_docs)]
 pub struct PerfSnapshot {
     pub transfers_total: u32,
     pub transfers_success: u32,

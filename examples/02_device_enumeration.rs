@@ -30,8 +30,6 @@ use cortex_m_rt::entry;
 use imxrt_usbh::phy::UsbPhy;
 use imxrt_usbh::ehci::{EhciController, Uninitialized};
 
-#[cfg(feature = "defmt")]
-use defmt_rtt as _;
 
 #[entry]
 fn main() -> ! {
