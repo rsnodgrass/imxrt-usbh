@@ -105,9 +105,17 @@ The examples demonstrate how to build separate class driver crates like `imxrt-u
 
 See the [`examples/`](examples/) directory for comprehensive examples and documentation:
 
-- **Device enumeration**: Complete USB 2.0 enumeration sequence
-- **HID keyboards**: Reference implementation for HID class drivers  
+### Getting Started Examples
+- **`01_basic_host_init.rs`** - USB PHY initialization with serial output
+- **`02_device_enumeration.rs`** - EHCI controller setup and basic host components
+
+These introductory examples output detailed status messages to serial (115200 baud on pins 0/1).
+Just flash to your Teensy 4.0/4.1 and open a serial monitor to see the initialization process.
+
+### Full Working Examples
+- **HID keyboards**: Reference implementation for HID class drivers
 - **Mass storage**: SCSI/BOT protocol implementation for USB drives
+- **MIDI devices**: USB MIDI keyboard handling
 - **RTIC integration**: Real-time USB handling patterns
 
 For detailed documentation and usage examples, see [examples/README.md](examples/README.md).

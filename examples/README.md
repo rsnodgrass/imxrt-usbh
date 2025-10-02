@@ -4,7 +4,45 @@ This directory contains comprehensive examples demonstrating different aspects o
 
 NOTE: For simplicity, these education examples do not currently use RTIC, even though underlying `imxrt-usbh` is RTIC based.
 
-## Available Examples
+## Getting Started Examples
+
+### `01_basic_host_init.rs` - USB PHY Initialization
+
+Simple introduction to USB host hardware initialization:
+
+- **USB PHY Setup**: Initialize USB PHY for host mode
+- **Serial Output**: Real-time status messages at 115200 baud (pins 0/1)
+- **LED Feedback**: Visual indication of success/failure
+- **Error Handling**: Basic error reporting patterns
+
+**Hardware Requirements:**
+- Teensy 4.0 or 4.1
+- Serial monitor at 115200 baud on pins 0/1
+
+```bash
+cargo build --example 01_basic_host_init --target thumbv7em-none-eabihf
+# Flash to Teensy, then open serial monitor to see initialization output
+```
+
+### `02_device_enumeration.rs` - EHCI Controller Setup
+
+Builds on example 01 by adding EHCI controller:
+
+- **EHCI Controller**: Create Enhanced Host Controller Interface instance
+- **Component Overview**: Understand USB host architecture
+- **Serial Output**: Detailed initialization steps
+- **LED Feedback**: Visual indication of success/failure
+
+**Hardware Requirements:**
+- Teensy 4.0 or 4.1
+- Serial monitor at 115200 baud on pins 0/1
+
+```bash
+cargo build --example 02_device_enumeration --target thumbv7em-none-eabihf
+# Flash to Teensy, then open serial monitor to see initialization output
+```
+
+## Full Working Examples
 
 ### `enumerate_device.rs` - Advanced USB Device Enumeration
 
