@@ -18,7 +18,8 @@
 //! - Teensy 4.0 or 4.1
 //! - USB host connections
 //!
-//! **To run:** Flash to your Teensy. LED blinks slowly if successful, rapidly if failed.
+//! **To run:** Flash to your Teensy. Open serial monitor at 115200 baud on pins 0/1.
+//! LED blinks slowly if successful, rapidly if failed.
 //!
 //! **Next Step:** Try the working examples (hid_keyboard.rs, etc.)
 
@@ -31,26 +32,41 @@ use teensy4_panic as _;
 
 use imxrt_usbh::phy::UsbPhy;
 use imxrt_usbh::ehci::{EhciController, Uninitialized};
+use cortex_m::prelude::_embedded_hal_serial_Write as _;
 
 #[bsp::rt::entry]
 fn main() -> ! {
     let board::Resources {
         pins,
         mut gpio2,
+        lpuart6,
         ..
     } = board::t40(board::instances());
 
     let led = board::led(&mut gpio2, pins.p13);
 
+    // Set up serial output on pins 0/1
+    let mut serial = board::lpuart(lpuart6, pins.p1, pins.p0, 115200);
+
+    // Helper to print strings
+    let mut print = |s: &str| {
+        for byte in s.bytes() {
+            nb::block!(serial.write(byte)).ok();
+        }
+    };
+
+    print("\r\n=== USB Host Example 02: EHCI Controller Setup ===\r\n");
+
     // STEP 1: Initialize USB PHY (same as example 01)
+    print("Step 1: Initializing USB PHY...\r\n");
     let mut phy = unsafe { UsbPhy::new(0x400D_9000, 0x400F_C000) };
 
     match phy.init_host_mode() {
         Ok(()) => {
-            // PHY initialized successfully
+            print("✓ USB PHY initialized\r\n");
         },
         Err(_) => {
-            // Failed - blink LED rapidly
+            print("✗ USB PHY initialization FAILED!\r\n");
             loop {
                 led.toggle();
                 cortex_m::asm::delay(60_000_000); // Fast blink = error
@@ -59,30 +75,27 @@ fn main() -> ! {
     }
 
     // STEP 2: Create EHCI Controller
-    // EHCI = Enhanced Host Controller Interface
-    // This manages all USB transfers and device communication
+    print("\r\nStep 2: Creating EHCI Controller...\r\n");
+    print("EHCI = Enhanced Host Controller Interface\r\n");
+
     let _controller = unsafe {
         match EhciController::<8, Uninitialized>::new(0x402E_0140) {
             Ok(controller) => {
-                // Success! We now have:
-                //   • USB PHY - Physical layer for USB signaling
-                //   • EHCI Controller - Manages USB protocol and transfers
-                //
-                // What's still missing for full USB host:
-                //   • Controller initialization and configuration
-                //   • DMA memory management setup
-                //   • Device enumeration state machine
-                //   • Transfer queue management
-                //   • Interrupt handling
-                //
-                // These complex topics are shown in working examples like:
-                //   • hid_keyboard.rs - Complete HID keyboard support
-                //   • mass_storage.rs - USB flash drive communication
-                //   • midi_keyboard.rs - MIDI device handling
+                print("✓ EHCI controller created successfully!\r\n");
+                print("\r\nWhat we have now:\r\n");
+                print("  • USB PHY - Physical layer for USB signaling\r\n");
+                print("  • EHCI Controller - Manages USB protocol and transfers\r\n");
+                print("\r\nWhat's still missing for full USB host:\r\n");
+                print("  • Controller initialization and configuration\r\n");
+                print("  • DMA memory management setup\r\n");
+                print("  • Device enumeration state machine\r\n");
+                print("  • Transfer queue management\r\n");
+                print("  • Interrupt handling\r\n");
+                print("\r\nSee full working examples: hid_keyboard.rs, midi_keyboard.rs\r\n");
                 controller
             },
             Err(_) => {
-                // Failed - blink LED rapidly
+                print("✗ EHCI controller creation FAILED!\r\n");
                 loop {
                     led.toggle();
                     cortex_m::asm::delay(60_000_000); // Fast blink = error
@@ -92,6 +105,8 @@ fn main() -> ! {
     };
 
     // Success! Blink LED slowly
+    print("\r\nSuccess! USB host components ready. LED blinking slowly.\r\n");
+
     led.set();
     loop {
         cortex_m::asm::delay(600_000_000); // Slow blink = success
