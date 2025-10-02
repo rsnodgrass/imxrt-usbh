@@ -39,17 +39,23 @@ impl StackMonitor {
     pub unsafe fn init_canary(&self) {
         let stack_end = self.stack_base - self.stack_size;
         let current_sp = cortex_m::register::msp::read() as u32;
-        
-        // Fill unused stack with canary pattern
+
+        // Validate stack hasn't already overflowed
+        if current_sp <= stack_end + self.guard_size {
+            // Stack already at limit, cannot safely initialize canary
+            return;
+        }
+
+        // Only fill the guard region at the bottom of the stack
+        // This is always unused and safe to write
         let canary_start = stack_end as *mut u32;
-        let canary_end = (current_sp - self.guard_size) as *mut u32;
         let canary_pattern = 0xDEADBEEF;
-        
+
         unsafe {
-            let mut ptr = canary_start;
-            while ptr < canary_end {
-                core::ptr::write_volatile(ptr, canary_pattern);
-                ptr = ptr.add(1);
+            // Fill guard region with canary pattern
+            let num_words = (self.guard_size / 4) as usize;
+            for offset in 0..num_words {
+                core::ptr::write_volatile(canary_start.add(offset), canary_pattern);
             }
         }
     }
@@ -269,53 +275,52 @@ impl DeadlineMonitor {
     }
 }
 
-/// Global stack monitor instance
-/// 
-/// # Safety
-/// 
-/// Must be initialized with correct stack boundaries at startup
-pub static mut STACK_MONITOR: StackMonitor = unsafe {
-    // Default values - must be updated at runtime
-    StackMonitor::new(0x2000_8000, 0x4000) // 16KB stack at 0x20004000-0x20008000
-};
+use critical_section::Mutex;
+use core::cell::RefCell;
+
+/// Global stack monitor instance protected by critical section
+///
+/// Uses Mutex<RefCell<>> for safe concurrent access without data races
+pub static STACK_MONITOR: Mutex<RefCell<Option<StackMonitor>>> = Mutex::new(RefCell::new(None));
 
 /// Initialize safety monitoring
-/// 
+///
 /// # Safety
-/// 
+///
 /// Must be called once at system startup with correct stack boundaries
 pub unsafe fn init_safety_monitoring(stack_base: u32, stack_size: u32) {
-    unsafe {
-        // Update stack monitor with actual values
-        STACK_MONITOR.stack_base = stack_base;
-        STACK_MONITOR.stack_size = stack_size;
-        
-        // Initialize stack canary
-        (*core::ptr::addr_of_mut!(STACK_MONITOR)).init_canary();
-    }
-    
+    // Create and initialize stack monitor
+    let monitor = unsafe {
+        let m = StackMonitor::new(stack_base, stack_size);
+        m.init_canary();
+        m
+    };
+
+    // Store in global with critical section
+    critical_section::with(|cs| {
+        STACK_MONITOR.borrow_ref_mut(cs).replace(monitor);
+    });
+
     // Enable DWT cycle counter for timing
     let mut peripherals = cortex_m::Peripherals::take().unwrap();
     peripherals.DCB.enable_trace();
     peripherals.DWT.enable_cycle_counter();
-    
+
     #[cfg(feature = "defmt")]
-    defmt::info!("Safety monitoring initialized: stack {:#x}..{:#x}", 
+    defmt::info!("Safety monitoring initialized: stack {:#x}..{:#x}",
                  stack_base - stack_size, stack_base);
 }
 
 /// Check all safety monitors
 #[inline(always)]
 pub fn check_safety() -> bool {
-    unsafe {
-        // Check stack overflow
-        if (*core::ptr::addr_of!(STACK_MONITOR)).check_stack() {
-            return false;
+    critical_section::with(|cs| {
+        if let Some(monitor) = STACK_MONITOR.borrow_ref(cs).as_ref() {
+            !monitor.check_stack()
+        } else {
+            true // No monitor initialized, assume safe
         }
-        
-        // Additional safety checks can be added here
-        true
-    }
+    })
 }
 
 /// Macro for adding safety checks to functions
