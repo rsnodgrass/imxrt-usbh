@@ -105,16 +105,18 @@ The examples demonstrate how to build separate class driver crates like `imxrt-u
 
 See the [`examples/`](examples/) directory for comprehensive examples and documentation:
 
-### Getting Started Examples
+### Getting Started Examples (Teensy 4.1 Only)
 - **`01_basic_host_init.rs`** - USB PHY initialization with serial output
 - **`02_device_enumeration.rs`** - EHCI controller setup and basic host components
 
-These introductory examples output detailed status messages to UART serial (115200 baud on pins 0/1).
-Just flash to your Teensy 4.0/4.1, connect a USB-to-serial adapter to pins 0/1, and open a serial monitor
-to see the initialization process.
+These examples are configured for **Teensy 4.1** using:
+- **USB2** for USB Host functionality (connecting keyboards, MIDI devices, etc.)
+- **USB1** remains available for programming and future CDC serial output
+- **UART (pins 0/1)** for current serial logging at 115200 baud
 
-**Note:** Serial output uses UART (not USB CDC) because the USB port is configured as a host to connect
-external USB devices. A USB port cannot be both host and device simultaneously.
+**Hardware Setup:**
+Connect a USB-to-serial adapter to pins 0/1 and open a serial monitor at 115200 baud
+to see detailed initialization messages.
 
 ### Full Working Examples
 - **HID keyboards**: Reference implementation for HID class drivers

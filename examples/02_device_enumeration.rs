@@ -15,11 +15,14 @@
 //! - Learn about the basic USB host architecture
 //!
 //! **Hardware Requirements:**
-//! - Teensy 4.0 or 4.1
-//! - USB host connections
+//! - **Teensy 4.1** board (USB2 host port required)
+//! - USB-to-serial adapter on pins 0/1 for output
+//! - USB Host device connected to USB2 port (5-pin header)
 //!
-//! **To run:** Flash to your Teensy. Open serial monitor at 115200 baud on pins 0/1.
+//! **To run:** Flash to your Teensy 4.1. Open serial monitor at 115200 baud on pins 0/1.
 //! LED blinks slowly if successful, rapidly if failed.
+//!
+//! **Note:** USB2 is used for USB Host, USB1 (micro USB) remains free for programming.
 //!
 //! **Next Step:** Try the working examples (hid_keyboard.rs, etc.)
 
@@ -59,7 +62,12 @@ fn main() -> ! {
 
     // STEP 1: Initialize USB PHY (same as example 01)
     print("Step 1: Initializing USB PHY...\r\n");
-    let mut phy = unsafe { UsbPhy::new(0x400D_9000, 0x400F_C000) };
+    // Using USB2 PHY for USB Host functionality (Teensy 4.1 USB Host port)
+    let mut phy = unsafe {
+        // 0x400DA000: USBPHY2 register base (USB Host port on Teensy 4.1)
+        // 0x400F_C000: CCM (Clock Control Module) base
+        UsbPhy::new(0x400DA000, 0x400F_C000)
+    };
 
     match phy.init_host_mode() {
         Ok(()) => {
@@ -79,7 +87,9 @@ fn main() -> ! {
     print("EHCI = Enhanced Host Controller Interface\r\n");
 
     let _controller = unsafe {
-        match EhciController::<8, Uninitialized>::new(0x402E_0140) {
+        // Using USB2 EHCI controller (USB Host port on Teensy 4.1)
+        // 0x402E_0400: USB2 EHCI register base
+        match EhciController::<8, Uninitialized>::new(0x402E_0400) {
             Ok(controller) => {
                 print("✓ EHCI controller created successfully!\r\n");
                 print("\r\nWhat we have now:\r\n");

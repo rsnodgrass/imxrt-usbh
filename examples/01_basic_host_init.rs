@@ -13,12 +13,14 @@
 //! - See basic error handling patterns
 //!
 //! **Hardware Requirements:**
-//! - Teensy 4.0 or 4.1 board
-//! - USB host connections on pins 30/31
-//! - 5V power for VBUS (through switching circuit)
+//! - **Teensy 4.1** board (USB2 host port required)
+//! - USB-to-serial adapter on pins 0/1 for output
+//! - USB Host device connected to USB2 port (5-pin header)
 //!
-//! **To run:** Flash to your Teensy. Open serial monitor at 115200 baud on pins 0/1.
+//! **To run:** Flash to your Teensy 4.1. Open serial monitor at 115200 baud on pins 0/1.
 //! LED blinks slowly if successful, rapidly if failed.
+//!
+//! **Note:** USB2 is used for USB Host, USB1 (micro USB) remains free for programming.
 //!
 //! **Next Step:** Try `02_device_enumeration.rs` to add device detection.
 
@@ -58,11 +60,13 @@ fn main() -> ! {
 
     // STEP 1: Initialize USB PHY
     // The USB PHY handles low-level signaling and must be set up first
+    // Using USB2 PHY for USB Host functionality (Teensy 4.1 USB Host port)
     let mut phy = unsafe {
         // These addresses are specific to i.MX RT1062:
-        // - 0x400D_9000: USBPHY1 register base
+        // - 0x400DA000: USBPHY2 register base (USB Host port on Teensy 4.1)
         // - 0x400F_C000: CCM (Clock Control Module) base
-        UsbPhy::new(0x400D_9000, 0x400F_C000)
+        // Note: USB1 (0x400D9000) is used for device mode (programming/CDC serial)
+        UsbPhy::new(0x400DA000, 0x400F_C000)
     };
 
     // STEP 2: Initialize PHY for host mode
