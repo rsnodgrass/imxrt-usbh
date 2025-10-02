@@ -16,13 +16,15 @@
 //!
 //! **Hardware Requirements:**
 //! - **Teensy 4.1** board (USB2 host port required)
-//! - USB-to-serial adapter on pins 0/1 for output
+//! - USB cable connected to micro USB port (for USB CDC logging)
 //! - USB Host device connected to USB2 port (5-pin header)
 //!
-//! **To run:** Flash to your Teensy 4.1. Open serial monitor at 115200 baud on pins 0/1.
-//! LED blinks slowly if successful, rapidly if failed.
+//! **To run:**
+//! 1. Flash to your Teensy 4.1
+//! 2. Open serial monitor on the micro USB port (USB CDC)
+//! 3. LED blinks slowly if successful, rapidly if failed
 //!
-//! **Note:** USB2 is used for USB Host, USB1 (micro USB) remains free for programming.
+//! **Note:** USB2 is used for USB Host, USB1 (micro USB) is used for CDC logging.
 //!
 //! **Next Step:** Try the working examples (hid_keyboard.rs, etc.)
 
@@ -35,33 +37,33 @@ use teensy4_panic as _;
 
 use imxrt_usbh::phy::UsbPhy;
 use imxrt_usbh::ehci::{EhciController, Uninitialized};
-use cortex_m::prelude::_embedded_hal_serial_Write as _;
+use log::info;
 
 #[bsp::rt::entry]
 fn main() -> ! {
     let board::Resources {
         pins,
         mut gpio2,
-        lpuart6,
+        usb,
+        mut dma,
         ..
     } = board::t40(board::instances());
 
     let led = board::led(&mut gpio2, pins.p13);
 
-    // Set up serial output on pins 0/1
-    let mut serial = board::lpuart(lpuart6, pins.p1, pins.p0, 115200);
+    // Set up USB CDC logging on USB1 (micro USB port)
+    let mut poller = imxrt_log::log::usbd(
+        usb,
+        imxrt_log::Interrupts::Enabled,
+    ).unwrap();
 
-    // Helper to print strings
-    let mut print = |s: &str| {
-        for byte in s.bytes() {
-            nb::block!(serial.write(byte)).ok();
-        }
-    };
-
-    print("\r\n=== USB Host Example 02: EHCI Controller Setup ===\r\n");
+    info!("\r\n=== USB Host Example 02: EHCI Controller Setup ===");
+    poller.poll();
 
     // STEP 1: Initialize USB PHY (same as example 01)
-    print("Step 1: Initializing USB PHY...\r\n");
+    info!("Step 1: Initializing USB PHY...");
+    poller.poll();
+
     // Using USB2 PHY for USB Host functionality (Teensy 4.1 USB Host port)
     let mut phy = unsafe {
         // 0x400DA000: USBPHY2 register base (USB Host port on Teensy 4.1)
@@ -71,55 +73,79 @@ fn main() -> ! {
 
     match phy.init_host_mode() {
         Ok(()) => {
-            print("✓ USB PHY initialized\r\n");
+            info!("✓ USB PHY initialized");
+            poller.poll();
         },
         Err(_) => {
-            print("✗ USB PHY initialization FAILED!\r\n");
+            info!("✗ USB PHY initialization FAILED!");
+            poller.poll();
             loop {
                 led.toggle();
                 cortex_m::asm::delay(60_000_000); // Fast blink = error
+                poller.poll();
             }
         }
     }
 
     // STEP 2: Create EHCI Controller
-    print("\r\nStep 2: Creating EHCI Controller...\r\n");
-    print("EHCI = Enhanced Host Controller Interface\r\n");
+    info!("");
+    info!("Step 2: Creating EHCI Controller...");
+    info!("EHCI = Enhanced Host Controller Interface");
+    poller.poll();
 
     let _controller = unsafe {
         // Using USB2 EHCI controller (USB Host port on Teensy 4.1)
         // 0x402E_0400: USB2 EHCI register base
         match EhciController::<8, Uninitialized>::new(0x402E_0400) {
             Ok(controller) => {
-                print("✓ EHCI controller created successfully!\r\n");
-                print("\r\nWhat we have now:\r\n");
-                print("  • USB PHY - Physical layer for USB signaling\r\n");
-                print("  • EHCI Controller - Manages USB protocol and transfers\r\n");
-                print("\r\nWhat's still missing for full USB host:\r\n");
-                print("  • Controller initialization and configuration\r\n");
-                print("  • DMA memory management setup\r\n");
-                print("  • Device enumeration state machine\r\n");
-                print("  • Transfer queue management\r\n");
-                print("  • Interrupt handling\r\n");
-                print("\r\nSee full working examples: hid_keyboard.rs, midi_keyboard.rs\r\n");
+                info!("✓ EHCI controller created successfully!");
+                poller.poll();
+                info!("");
+                info!("What we have now:");
+                info!("  • USB PHY - Physical layer for USB signaling");
+                info!("  • EHCI Controller - Manages USB protocol and transfers");
+                poller.poll();
+                info!("");
+                info!("What's still missing for full USB host:");
+                info!("  • Controller initialization and configuration");
+                info!("  • DMA memory management setup");
+                info!("  • Device enumeration state machine");
+                info!("  • Transfer queue management");
+                info!("  • Interrupt handling");
+                poller.poll();
+                info!("");
+                info!("See full working examples: hid_keyboard.rs, midi_keyboard.rs");
+                poller.poll();
                 controller
             },
             Err(_) => {
-                print("✗ EHCI controller creation FAILED!\r\n");
+                info!("✗ EHCI controller creation FAILED!");
+                poller.poll();
                 loop {
                     led.toggle();
                     cortex_m::asm::delay(60_000_000); // Fast blink = error
+                    poller.poll();
                 }
             }
         }
     };
 
     // Success! Blink LED slowly
-    print("\r\nSuccess! USB host components ready. LED blinking slowly.\r\n");
+    info!("");
+    info!("Success! USB host components ready. LED blinking slowly.");
+    poller.poll();
 
     led.set();
+    let mut counter = 0u32;
     loop {
         cortex_m::asm::delay(600_000_000); // Slow blink = success
         led.toggle();
+        poller.poll();
+
+        counter += 1;
+        if counter % 2 == 0 {
+            info!("USB host ready... ({}s)", counter);
+            poller.poll();
+        }
     }
 }

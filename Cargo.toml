@@ -41,8 +41,11 @@ teensy4-bsp = { version = "0.4", features = ["rt"] }
 teensy4-panic = "0.2"
 imxrt-hal = { version = "0.5", features = ["imxrt1060"] }
 imxrt-dma = "0.1"
-imxrt-log = { version = "0.1", features = ["log", "lpuart"] }
+imxrt-log = { version = "0.1", features = ["log", "lpuart", "usbd"] }
 log = "0.4"
+imxrt-usbd = "0.3"
+usb-device = "0.3"
+usbd-serial = "0.2"
 
 [features]
 # Default features for embedded use
