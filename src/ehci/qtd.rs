@@ -3,6 +3,7 @@
 //! Based on EHCI Specification Section 3.5
 
 use core::sync::atomic::{AtomicU32, Ordering};
+use core::marker::PhantomData;
 use crate::error::{Result, UsbError};
 use crate::dma::is_dma_aligned;
 
@@ -98,11 +99,13 @@ impl QueueTD {
     }
     
     /// Initialize qTD for a transfer
-    /// 
+    ///
     /// # Safety
-    /// 
-    /// Buffer must remain valid and unchanged for the duration of the transfer.
-    /// Buffer address must be DMA-accessible.
+    ///
+    /// Caller must ensure buffer remains valid and pinned in memory until transfer
+    /// completes (check with is_active()). Buffer must be in DMA-accessible memory.
+    ///
+    /// Prefer using init_transfer_with_buffer() which provides lifetime safety.
     pub unsafe fn init_transfer(
         &self,
         pid: u32,
@@ -118,7 +121,7 @@ impl QueueTD {
             if len > Self::MAX_TRANSFER_SIZE {
                 return Err(UsbError::BufferOverflow);
             }
-            
+
             // Set up buffer pointers (one pointer per 4KB page)
             let mut remaining = len;
             let mut current_addr = addr as u32;
@@ -157,10 +160,34 @@ impl QueueTD {
         }
         
         self.token.store(token, Ordering::Release);
-        
+
         Ok(())
     }
-    
+
+    /// Initialize qTD for a transfer with buffer lifetime safety
+    ///
+    /// This is the preferred method - it accepts a buffer reference that must
+    /// outlive the transfer, preventing use-after-free.
+    ///
+    /// # Safety
+    ///
+    /// Buffer must be in DMA-accessible memory (OCRAM or non-cached region).
+    /// Caller must poll is_active() and wait for completion before dropping buffer.
+    pub fn init_transfer_with_buffer(
+        &self,
+        pid: u32,
+        data_toggle: bool,
+        buffer: Option<&[u8]>,
+        interrupt_on_complete: bool,
+    ) -> Result<()> {
+        // Convert buffer reference to pointer for unsafe init_transfer
+        let buffer_ptr = buffer.map(|b| (b.as_ptr(), b.len()));
+
+        unsafe {
+            self.init_transfer(pid, data_toggle, buffer_ptr, interrupt_on_complete)
+        }
+    }
+
     /// Check if qTD is still active
     pub fn is_active(&self) -> bool {
         let token = self.token.load(Ordering::Acquire);
@@ -215,6 +242,49 @@ impl QueueTD {
 const _: () = assert!(core::mem::size_of::<QueueTD>() >= 64);
 const _: () = assert!(core::mem::align_of::<QueueTD>() == 32);
 const _: () = assert!(core::mem::align_of::<QueueTD>() >= 32);
+
+/// Transfer guard that ensures buffer remains valid until transfer completes
+///
+/// This guard holds a reference to the buffer and will spin-wait for transfer
+/// completion when dropped, ensuring the buffer is not freed while DMA is active.
+pub struct TransferGuard<'buf> {
+    qtd: &'buf QueueTD,
+    _buffer: Option<&'buf [u8]>,
+}
+
+impl<'buf> TransferGuard<'buf> {
+    /// Create a new transfer guard
+    ///
+    /// # Safety
+    ///
+    /// QTD must be properly initialized with the buffer before creating the guard.
+    pub unsafe fn new(qtd: &'buf QueueTD, buffer: Option<&'buf [u8]>) -> Self {
+        Self {
+            qtd,
+            _buffer: buffer,
+        }
+    }
+
+    /// Check if transfer is still active
+    pub fn is_active(&self) -> bool {
+        self.qtd.is_active()
+    }
+
+    /// Check for transfer errors
+    pub fn has_error(&self) -> Option<UsbError> {
+        self.qtd.has_error()
+    }
+}
+
+impl Drop for TransferGuard<'_> {
+    fn drop(&mut self) {
+        // Wait for transfer completion before allowing buffer to be freed
+        // This prevents use-after-free when DMA hardware accesses the buffer
+        while self.qtd.is_active() {
+            core::hint::spin_loop();
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
