@@ -25,3 +25,10 @@ lto = true          # Enable link-time optimization
 debug = true        # Keep debug info for profiling
 codegen-units = 1   # Better optimization
 panic = "abort"     # Smaller binary size
+
+# Cargo aliases for building and flashing
+[alias]
+# Build example and convert to hex file for flashing to Teensy
+hexify = "objcopy --release --example"
+# Build all examples
+build-examples = "build --release --examples"

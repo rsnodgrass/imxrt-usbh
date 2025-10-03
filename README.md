@@ -38,7 +38,35 @@ brew install lld  # macOS
 
 # Add ARM Cortex-M7 target
 rustup target add thumbv7em-none-eabihf
+
+# Install cargo-binutils for creating hex files
+cargo install cargo-binutils
+rustup component add llvm-tools-preview
 ```
+
+### Building and Flashing Examples
+
+Build an example and create a hex file for flashing to Teensy 4.x:
+
+```bash
+# Build example binary
+cargo build --release --example enumerate_device
+
+# Convert to Intel hex format for flashing
+cargo objcopy --release --example enumerate_device -- -O ihex enumerate_device.hex
+
+# Flash to Teensy using teensy_loader_cli
+teensy_loader_cli --mcu=TEENSY41 -w enumerate_device.hex
+
+# Or use the Teensy Loader GUI application
+```
+
+The build process uses teensy4-bsp which provides the correct linker scripts for i.MX RT1062 memory layout:
+- ITCM: 512KB instruction tightly-coupled memory
+- DTCM: 512KB data tightly-coupled memory
+- OCRAM: 512KB on-chip RAM
+- Flash: 8MB on Teensy 4.1
+- External RAM: 8MB PSRAM on Teensy 4.1
 
 ### Basic Usage
 
