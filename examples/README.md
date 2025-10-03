@@ -41,8 +41,10 @@ Simple introduction to USB host hardware initialization:
 - Serial monitor at 115200 baud on pins 0/1
 
 ```bash
-cargo build --example 01_basic_host_init --target thumbv7em-none-eabihf
-# Flash to Teensy, then open serial monitor to see initialization output
+cargo build --release --example 01_basic_host_init
+cargo objcopy --release --example 01_basic_host_init -- -O ihex 01_basic_host_init.hex
+teensy_loader_cli --mcu=TEENSY41 -w 01_basic_host_init.hex
+# Open serial monitor to see initialization output
 ```
 
 ### `02_device_enumeration.rs` - EHCI Controller Setup
@@ -59,8 +61,10 @@ Builds on example 01 by adding EHCI controller:
 - Serial monitor at 115200 baud on pins 0/1
 
 ```bash
-cargo build --example 02_device_enumeration --target thumbv7em-none-eabihf
-# Flash to Teensy, then open serial monitor to see initialization output
+cargo build --release --example 02_device_enumeration
+cargo objcopy --release --example 02_device_enumeration -- -O ihex 02_device_enumeration.hex
+teensy_loader_cli --mcu=TEENSY41 -w 02_device_enumeration.hex
+# Open serial monitor to see initialization output
 ```
 
 ## Full Working Examples
@@ -83,7 +87,9 @@ Comprehensive USB device enumeration with advanced features:
 - Performance monitoring and statistics
 
 ```bash
-cargo build --example enumerate_device --target thumbv7em-none-eabihf
+cargo build --release --example enumerate_device
+cargo objcopy --release --example enumerate_device -- -O ihex enumerate_device.hex
+teensy_loader_cli --mcu=TEENSY41 -w enumerate_device.hex
 ```
 
 ### `hid_keyboard.rs` - Complete HID Keyboard Implementation
@@ -106,7 +112,9 @@ Full-featured QWERTY keyboard implementation with comprehensive functionality:
 - Multi-device keyboard management
 
 ```bash
-cargo build --example hid_keyboard --target thumbv7em-none-eabihf
+cargo build --release --example hid_keyboard
+cargo objcopy --release --example hid_keyboard -- -O ihex hid_keyboard.hex
+teensy_loader_cli --mcu=TEENSY41 -w hid_keyboard.hex
 ```
 
 ### `hid_gamepad.rs` - HID Gamepad Support
@@ -126,7 +134,9 @@ Gamepad and joystick support implementation:
 - Real-time input processing
 
 ```bash
-cargo build --example hid_gamepad --target thumbv7em-none-eabihf
+cargo build --release --example hid_gamepad
+cargo objcopy --release --example hid_gamepad -- -O ihex hid_gamepad.hex
+teensy_loader_cli --mcu=TEENSY41 -w hid_gamepad.hex
 ```
 
 ### `mass_storage.rs` - Complete Mass Storage Implementation
@@ -154,7 +164,9 @@ Full USB Mass Storage Class (MSC) implementation using Bulk-Only Transport:
 - Performance monitoring and statistics
 
 ```bash
-cargo build --example mass_storage --target thumbv7em-none-eabihf
+cargo build --release --example mass_storage
+cargo objcopy --release --example mass_storage -- -O ihex mass_storage.hex
+teensy_loader_cli --mcu=TEENSY41 -w mass_storage.hex
 ```
 
 ### `midi_keyboard.rs` - MIDI Device Implementation
@@ -181,7 +193,9 @@ Complete USB MIDI device implementation with real-time processing:
 - Low-latency interrupt transfer usage
 
 ```bash
-cargo build --example midi_keyboard --target thumbv7em-none-eabihf
+cargo build --release --example midi_keyboard
+cargo objcopy --release --example midi_keyboard -- -O ihex midi_keyboard.hex
+teensy_loader_cli --mcu=TEENSY41 -w midi_keyboard.hex
 ```
 
 ## Educational Design
@@ -231,14 +245,30 @@ fn configure_usb_clocks() {
 - Rust toolchain with `thumbv7em-none-eabihf` target
 - Teensy 4.0/4.1 development board
 - USB devices for testing (keyboard, flash drive, etc.)
+- `cargo-binutils` for creating hex files (install with `cargo install cargo-binutils`)
+- `llvm-tools-preview` component (install with `rustup component add llvm-tools-preview`)
 
-### Build All Examples
+### Build Examples
+
+Build examples and create hex files for flashing:
+
 ```bash
-# Build all examples
-cargo build --examples --target thumbv7em-none-eabihf
-
 # Build specific example
-cargo build --example hid_keyboard --target thumbv7em-none-eabihf
+cargo build --release --example enumerate_device
+
+# Convert to Intel hex format for flashing
+cargo objcopy --release --example enumerate_device -- -O ihex enumerate_device.hex
+
+# Flash to Teensy using teensy_loader_cli
+teensy_loader_cli --mcu=TEENSY41 -w enumerate_device.hex
+
+# Or use the Teensy Loader GUI application
+```
+
+Build all examples at once:
+
+```bash
+cargo build --release --examples
 ```
 
 ### Hardware Setup
