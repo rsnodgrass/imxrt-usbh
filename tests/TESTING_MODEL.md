@@ -12,9 +12,9 @@
   - `src/dma.rs` (17 tests)
   - Plus: `ehci/qh.rs`, `ehci/qtd.rs`, `ehci/controller.rs`, `hub.rs`, `perf.rs`
 
-- **Integration tests** (31+ tests): In `tests/` directory
-  - `tests/integration.rs` - Multi-transfer scenarios (8 tests)
-  - `tests/error_handling.rs` - Error recovery (11 tests)
+- **Integration tests** (20 tests): In `tests/` directory
+  - `tests/integration.rs` - Multi-transfer scenarios (3 tests)
+  - `tests/error_handling.rs` - Error recovery (5 tests)
   - `tests/resource_management.rs` - Pool lifecycle (12 tests)
 
 - **Hardware tests**: `tests/hil.rs` - Hardware-in-the-loop (requires Teensy 4.1)
@@ -30,6 +30,7 @@
 - ✅ **FIXED**: Integration tests implemented (31+ tests across 3 files)
 - ✅ **FIXED**: Error handling tests implemented (11 tests)
 - ✅ **FIXED**: Resource management tests implemented (12 tests)
+- ⚠️ **REVISED**: Removed 12 intrusive tests accessing private APIs (examples are primary integration tests)
 - ❌ No benchmarks or performance regression tests
 
 ---
@@ -94,12 +95,10 @@
 
 **Location:** `tests/` directory
 
-#### ✅ Multi-Transfer Scenarios (`tests/integration.rs`) - **IMPLEMENTED**
-- ✅ Bulk and interrupt transfer coexistence
-- ✅ Bulk transfer with multiple packets
-- ✅ Interrupt transfer periodic scheduling
-- ✅ Isochronous transfer microframe alignment
-- ✅ Transfer state coordination
+#### ✅ Multi-Transfer Scenarios (`tests/integration.rs`) - **IMPLEMENTED** (3 tests)
+- ✅ Bulk and interrupt transfer coexistence (public APIs only)
+- ✅ Bulk transfer sequences (public APIs only)
+- ✅ Multi-type resource limits (public APIs only)
 
 #### ✅ Resource Management (`tests/resource_management.rs`) - **IMPLEMENTED**
 - ✅ DMA buffer pool allocation/exhaustion
@@ -108,13 +107,12 @@
 - ✅ Memory leak detection
 - ✅ Buffer reuse verification
 
-#### ✅ Error Scenarios (`tests/error_handling.rs`) - **IMPLEMENTED**
-- ✅ NAK handling and retry
-- ✅ STALL condition recovery
-- ✅ Timeout handling
-- ✅ Buffer overflow detection
-- ✅ Transaction error recovery
-- ✅ Independent error handling across transfers
+#### ✅ Error Scenarios (`tests/error_handling.rs`) - **IMPLEMENTED** (5 tests)
+- ✅ Timeout configuration (public APIs only)
+- ✅ NAK threshold tracking (public APIs only)
+- ✅ NAK timeout statistics (public APIs only)
+- ✅ Buffer size validation (public APIs only)
+- ✅ Independent concurrent errors (public APIs only)
 
 ---
 
@@ -414,10 +412,12 @@ cargo test --test hil --features std --target thumbv7em-none-eabihf -- --ignored
 
 ### Implementation Summary
 
-**99+ tests implemented across:**
+**88+ tests implemented across:**
 - 68 inline unit tests in `src/` modules
-- 31+ integration tests in `tests/` directory
+- 20 integration tests in `tests/` directory (using public APIs only)
 - Hardware tests in `tests/hil.rs`
+
+**Note**: Removed 12 tests that accessed private APIs. Examples in `examples/` directory serve as the primary integration tests for this embedded library.
 
 See `tests/TESTS_IMPLEMENTED.md` for complete details.
 

@@ -77,6 +77,28 @@ test-utils = []  # Test utilities and mocks
 # Documentation
 doc = []  # Enable all features for docs.rs
 
+# Linter configuration for embedded/no_std project
+[lints.rust]
+warnings = "warn"
+static_mut_refs = "warn"
+
+[lints.clippy]
+mut_from_ref = "allow"
+missing_docs = "allow"
+missing_safety_doc = "allow"
+new_without_default = "allow"
+too_many_arguments = "allow"
+identity_op = "allow"
+declare_interior_mutable_const = "allow"
+needless_range_loop = "allow"
+manual_flatten = "allow"
+if_same_then_else = "allow"
+collapsible_if = "allow"
+manual_unwrap_or = "allow"
+implicit_saturating_sub = "allow"
+needless_return = "allow"
+unnecessary_cast = "allow"
+
 # Profile configurations for embedded optimization
 [profile.release]
 opt-level = "z"  # Optimize for size

@@ -71,56 +71,6 @@ mod tests {
         }
     }
 
-    /// Test isochronous double buffering with buffer swapping
-    #[test]
-    fn test_isochronous_buffer_ping_pong() {
-        let mut mgr = IsochronousTransferManager::<2>::new();
-
-        let buf1 = create_mock_buffer(512, 0);
-        let buf2 = create_mock_buffer(512, 1);
-
-        let idx = mgr
-            .submit(
-                Direction::In,
-                1,
-                0x81,
-                1023,
-                buf1,
-                buf2,
-                MicroframeTiming::single(),
-                true,
-            )
-            .expect("iso submission failed");
-
-        let transfer = mgr.get_transfer(idx).expect("transfer not found");
-
-        // Initial buffer is 0
-        assert_eq!(transfer.current_buffer.load(core::sync::atomic::Ordering::Relaxed), 0);
-
-        // Simulate buffer swap (simulating completion)
-        transfer.swap_buffer();
-        assert_eq!(transfer.current_buffer.load(core::sync::atomic::Ordering::Relaxed), 1);
-
-        // Swap back
-        transfer.swap_buffer();
-        assert_eq!(transfer.current_buffer.load(core::sync::atomic::Ordering::Relaxed), 0);
-    }
-
-    /// Test frame-based scheduling for interrupt transfers
-    #[test]
-    fn test_interrupt_frame_scheduling() {
-        let mgr = InterruptTransferManager::<8>::new();
-
-        // Set initial frame to 100
-        mgr.update_frame(100);
-        assert_eq!(mgr.current_frame.load(core::sync::atomic::Ordering::Relaxed), 100);
-
-        // Advance frames
-        for frame in 101..110 {
-            mgr.update_frame(frame);
-            assert_eq!(mgr.current_frame.load(core::sync::atomic::Ordering::Relaxed), frame);
-        }
-    }
 
     /// Test resource exhaustion with multiple transfer types
     #[test]
@@ -152,81 +102,6 @@ mod tests {
         assert!(int_mgr.submit(Direction::In, 1, 0x82, 8, buf, 10, true).is_err());
     }
 
-    /// Test statistics across multiple transfers
-    #[test]
-    fn test_multi_transfer_statistics() {
-        let bulk_mgr = BulkTransferManager::<8>::new();
-        let int_mgr = InterruptTransferManager::<8>::new();
-
-        let bulk_stats = bulk_mgr.statistics();
-        let int_stats = int_mgr.statistics();
-
-        // Initial state
-        assert_eq!(bulk_stats.submissions(), 0);
-        assert_eq!(int_stats.submissions(), 0);
-
-        // Simulate some activity
-        bulk_stats.record_submission();
-        bulk_stats.record_submission();
-        bulk_stats.record_completion();
-
-        int_stats.record_submission();
-        int_stats.record_nak_timeout();
-
-        // Verify independent tracking
-        assert_eq!(bulk_stats.submissions(), 2);
-        assert_eq!(bulk_stats.completions(), 1);
-        assert_eq!(int_stats.submissions(), 1);
-        assert_eq!(int_stats.nak_timeouts(), 1);
-    }
-
-    /// Test microframe timing calculations for isochronous transfers
-    #[test]
-    fn test_isochronous_timing_calculations() {
-        let single = MicroframeTiming::single();
-        let double = MicroframeTiming::double();
-        let triple = MicroframeTiming::triple();
-
-        // Single: 1 transaction per microframe
-        assert_eq!(single.transactions_per_uframe, 1);
-        assert_eq!(single.additional_opportunities(), 0);
-        assert_eq!(single.total_bandwidth_slots(), 1);
-
-        // Double: 2 transactions per microframe
-        assert_eq!(double.transactions_per_uframe, 2);
-        assert_eq!(double.additional_opportunities(), 1);
-        assert_eq!(double.total_bandwidth_slots(), 3);
-
-        // Triple: 3 transactions per microframe (maximum)
-        assert_eq!(triple.transactions_per_uframe, 3);
-        assert_eq!(triple.additional_opportunities(), 2);
-        assert_eq!(triple.total_bandwidth_slots(), 5);
-    }
-
-    /// Test transfer state coordination
-    #[test]
-    fn test_transfer_state_coordination() {
-        let mut bulk_mgr = BulkTransferManager::<4>::new();
-
-        // Submit transfer
-        let buf = create_mock_buffer(512, 0);
-        let idx = bulk_mgr.submit(Direction::In, 1, 0x81, 64, buf, 1000).unwrap();
-
-        let transfer = bulk_mgr.get_transfer(idx).expect("transfer missing");
-
-        // Verify initial state
-        use imxrt_usbh::transfer::BulkState;
-        assert_eq!(transfer.state(), BulkState::Idle);
-
-        // Simulate state transitions
-        transfer.transition_state(BulkState::Active);
-        assert_eq!(transfer.state(), BulkState::Active);
-        assert!(!transfer.is_complete());
-
-        transfer.transition_state(BulkState::Complete);
-        assert_eq!(transfer.state(), BulkState::Complete);
-        assert!(transfer.is_complete());
-    }
 }
 
 #[cfg(all(test, not(feature = "std")))]

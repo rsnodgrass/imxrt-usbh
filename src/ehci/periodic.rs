@@ -230,7 +230,7 @@ static INTERRUPT_SCHEDULER: InterruptScheduler = InterruptScheduler::new();
 ///
 /// Must be called once during USB host initialization
 pub unsafe fn init_periodic_schedule(op_base: usize) -> Result<()> {
-    let frame_list = unsafe { &PERIODIC_FRAME_LIST };
+    let frame_list = unsafe { &*core::ptr::addr_of!(PERIODIC_FRAME_LIST) };
 
     // Set PERIODICLISTBASE register (offset 0x14)
     let base_addr = frame_list.base_address();
@@ -307,7 +307,7 @@ pub fn disable_periodic_schedule(op_base: usize) -> Result<()> {
 ///
 /// Caller must ensure exclusive access if modifying
 pub unsafe fn get_frame_list() -> &'static PeriodicFrameList {
-    unsafe { &PERIODIC_FRAME_LIST }
+    unsafe { &*core::ptr::addr_of!(PERIODIC_FRAME_LIST) }
 }
 
 /// Get access to global interrupt scheduler

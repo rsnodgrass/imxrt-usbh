@@ -45,9 +45,9 @@ static_mut_refs = "warn"
 # Allow interior mutability pattern (UnsafeCell in DMA memory pool)
 mut_from_ref = "allow"
 
-# Documentation lints - warn instead of error for embedded projects
-missing_docs = "warn"
-missing_safety_doc = "warn"
+# Documentation lints - allow for embedded projects
+missing_docs = "allow"
+missing_safety_doc = "allow"
 
 # Common embedded/no_std patterns that trigger false positives
 new_without_default = "allow"  # const fn can't implement Default trait

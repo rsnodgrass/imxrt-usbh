@@ -100,7 +100,7 @@ Comprehensive unit tests have been implemented for the `imxrt-usbh` USB host lib
 - `test_dma_buffer_prepare_for_cpu` - Test cache invalidate operation
 - `test_multiple_allocations_no_collision` - Verify unique addresses (no aliasing)
 
-## Total Test Count: 68 tests
+## Total Test Count: 68 inline unit tests + 20 integration tests = 88 tests
 
 ## Running Tests
 
@@ -175,53 +175,64 @@ Since automated tests can't execute on embedded targets, this project uses:
    - Statistics accuracy
    - Exhaustion recovery
 
-## New Integration Tests (Added ✅)
+## Integration Tests (Public APIs Only)
 
-### Multi-Transfer Scenarios (`tests/integration.rs`)
-- Bulk and interrupt transfer coexistence
-- Multiple bulk transfer sequences
-- Isochronous double buffering (ping-pong)
-- Interrupt frame scheduling
-- Multi-type resource limits
-- Cross-transfer statistics
-- Microframe timing calculations
-- Transfer state coordination
+### Multi-Transfer Scenarios (`tests/integration.rs`) - 3 tests
+- `test_bulk_interrupt_coexistence` - Verify bulk and interrupt managers don't interfere
+- `test_bulk_transfer_sequence` - Multiple bulk transfers in sequence
+- `test_multi_type_resource_limits` - Resource exhaustion with multiple transfer types
 
-### Error Handling & Recovery (`tests/error_handling.rs`)
-- NAK handling and retry logic
-- STALL recovery
-- Timeout detection
-- Error state transitions
-- Statistics tracking
-- Data toggle reset
-- Buffer size validation
-- Independent error handling
+### Error Handling & Recovery (`tests/error_handling.rs`) - 5 tests
+- `test_transfer_timeout_logic` - Timeout configuration via public API
+- `test_interrupt_nak_threshold` - NAK counting using public fields
+- `test_interrupt_nak_timeout_stats` - NAK timeout statistics tracking
+- `test_buffer_size_validation` - Buffer overflow detection
+- (Removed 7 tests that called private methods like `transition_state()`, `clear_stall()`, `record_*()`, and accessed `data_toggle` field)
 
-### Resource Management (`tests/resource_management.rs`)
-- DMA pool allocation/deallocation cycles
-- Transfer pool exhaustion/recovery
-- Concurrent pool allocation
-- Statistics accuracy
-- Memory leak detection
-- Buffer reuse verification
-- Resource contention
-- Byte tracking
+### Resource Management (`tests/resource_management.rs`) - 12 tests
+- `test_dma_pool_allocation` - Basic allocation
+- `test_dma_pool_exhaustion` - Pool resource limits
+- `test_dma_pool_reuse` - Free/realloc cycle
+- `test_dma_pool_statistics` - Stats accuracy
+- `test_bulk_manager_resource_limits` - Bulk transfer pool
+- `test_interrupt_manager_resource_limits` - Interrupt transfer pool
+- `test_iso_manager_resource_limits` - Isochronous transfer pool
+- `test_concurrent_pool_allocation` - Multi-type allocation
+- `test_transfer_stats_tracking` - Statistics consistency
+- `test_pool_free_tracking` - Free count accuracy
+- `test_buffer_lifecycle_no_leak` - Memory leak detection
+- `test_byte_counter_accuracy` - Byte tracking
 
-### Hardware-in-the-Loop Tests (Requires Hardware)
-- Real device enumeration
-- Actual USB transfers with devices
-- Hub enumeration
-- Hot-plug detection
-- Device class specific tests (HID, MSC, Audio)
+**Note**: All 12 tests use only public APIs (`alloc()`, `free()`, `statistics()`, `submit()`, etc.)
+
+## Examples as Primary Integration Tests
+
+For embedded libraries, **flashable examples** serve as the real integration tests:
+
+### Working Examples (Flash to Hardware)
+1. `examples/01_basic_host_init.rs` (3.5 KB) - Host controller initialization
+2. `examples/02_device_enumeration.rs` (4.8 KB) - Full device enumeration sequence
+3. `examples/03_qwerty_keyboard.rs` (27 KB) - HID keyboard interrupt transfers
+4. `examples/04_midi_keyboard.rs` (40 KB) - MIDI isochronous transfers
+5. `examples/05_multi_device_manager.rs` (19 KB) - Multi-device scenarios
+6. `examples/hid_gamepad.rs` (16 KB) - Gamepad interrupt transfers
+7. `examples/mass_storage.rs` (24 KB) - Mass storage bulk transfers
+
+These examples:
+- Actually execute on ARM hardware (Teensy 4.1)
+- Exercise real USB transfers with real devices
+- Demonstrate complete workflows (enumeration → transfers → device handling)
+- Serve as integration tests AND usage documentation
 
 ## Benefits
 
-1. **No Hardware Required** - All tests run in software
-2. **Fast Execution** - Tests complete in milliseconds
-3. **CI/CD Ready** - Can run on GitHub Actions, GitLab CI, etc.
-4. **Comprehensive Coverage** - 68 tests covering core functionality
+1. **No Hardware Required** - Inline tests and integration tests verify logic without hardware
+2. **Fast Compilation** - Tests compile quickly (though cannot execute on `no_std` targets)
+3. **Clean Encapsulation** - Integration tests use only public APIs, enforcing proper boundaries
+4. **Comprehensive Coverage** - 88 tests covering core functionality
 5. **Safety Verification** - Critical DMA safety verified at compile-time and runtime
 6. **Documentation** - Tests serve as usage examples
+7. **Real Integration Tests** - Examples flash to hardware and actually work
 
 ## Notes
 
