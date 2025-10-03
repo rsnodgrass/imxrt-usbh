@@ -1,0 +1,53 @@
+# Pre-commit hooks for Rust embedded project
+# Install: pip install pre-commit
+# Setup: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Rust formatting with rustfmt
+  - repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+      - id: fmt
+        name: cargo fmt
+        description: Format Rust code with rustfmt
+        args: ['--manifest-path=Cargo.toml', '--', '--check']
+
+      - id: cargo-check
+        name: cargo check
+        description: Check Rust code compiles
+        args: ['--manifest-path=Cargo.toml', '--target=thumbv7em-none-eabihf']
+
+      - id: clippy
+        name: cargo clippy
+        description: Lint Rust code with clippy
+        args:
+          - '--manifest-path=Cargo.toml'
+          - '--target=thumbv7em-none-eabihf'
+          - '--'
+          - '-D'
+          - 'warnings'
+
+  # General file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.hex$|\.patch$'
+      - id: end-of-file-fixer
+        exclude: '\.hex$|\.patch$'
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # Prevent committing to main
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: no-commit-to-branch
+        args: ['--branch', 'main']
+        stages: [commit]
