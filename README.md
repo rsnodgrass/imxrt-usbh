@@ -29,11 +29,11 @@ git clone https://github.com/acertain/imxrt-usbh
 cd imxrt-usbh
 
 # Build and create hex file
-cargo build --release --example 01_basic_host_init
-cargo objcopy --release --example 01_basic_host_init -- -O ihex 01.hex
+cargo build --release --example 01_basic_host_init --target thumbv7em-none-eabihf
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/01_basic_host_init target/thumbv7em-none-eabihf/release/examples/01_basic_host_init.hex
 
 # Flash to Teensy
-teensy_loader_cli --mcu=TEENSY41 -w 01.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/01_basic_host_init.hex
 ```
 
 **Success indicator**: LED blinks slowly. Fast blink means error.
@@ -45,9 +45,9 @@ teensy_loader_cli --mcu=TEENSY41 -w 01.hex
 Adds the EHCI controller:
 
 ```bash
-cargo build --release --example 02_device_enumeration
-cargo objcopy --release --example 02_device_enumeration -- -O ihex 02.hex
-teensy_loader_cli --mcu=TEENSY41 -w 02.hex
+cargo build --release --example 02_device_enumeration --target thumbv7em-none-eabihf
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/02_device_enumeration target/thumbv7em-none-eabihf/release/examples/02_device_enumeration.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/02_device_enumeration.hex
 ```
 
 **Success indicator**: LED blinks slowly. Fast blink means error.
@@ -90,13 +90,13 @@ To see detailed initialization messages:
 ## Additional Examples
 
 See the [`examples/`](examples/) directory for more advanced examples:
-- **`03_qwerty_keyboard.rs`** - USB keyboard support with full key mapping and modifiers
+- **`03_qwerty_keyboard.rs`** - USB keyboard support with real keypresses displayed
 - **`04_midi_keyboard.rs`** - MIDI device support with real-time event processing
-- **`enumerate_device.rs`** - Full device enumeration and management
-- **`hid_gamepad.rs`** - Game controller support
+- **`05_multi_device_manager.rs`** - Multi-device management and string descriptors
+- **`hid_gamepad.rs`** - Game controller support with button/stick input
 - **`mass_storage.rs`** - USB flash drive support (SCSI/BOT protocol)
 
-For detailed documentation, see [examples/README.md](examples/README.md).
+For detailed documentation and build instructions, see [examples/README.md](examples/README.md).
 
 ## Library Usage
 

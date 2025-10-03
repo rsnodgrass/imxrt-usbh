@@ -12,9 +12,9 @@ The simplest example - just turn on the USB hardware.
 
 **Build and flash:**
 ```bash
-cargo build --release --example 01_basic_host_init
-cargo objcopy --release --example 01_basic_host_init -- -O ihex 01.hex
-teensy_loader_cli --mcu=TEENSY41 -w 01.hex
+cargo build --release --example 01_basic_host_init --target thumbv7em-none-eabihf
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/01_basic_host_init target/thumbv7em-none-eabihf/release/examples/01_basic_host_init.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/01_basic_host_init.hex
 ```
 
 **Success indicator**: LED blinks slowly (fast blink = error)
@@ -27,9 +27,9 @@ Builds on Example 01 by adding the USB host controller.
 
 **Build and flash:**
 ```bash
-cargo build --release --example 02_device_enumeration
-cargo objcopy --release --example 02_device_enumeration -- -O ihex 02.hex
-teensy_loader_cli --mcu=TEENSY41 -w 02.hex
+cargo build --release --example 02_device_enumeration --target thumbv7em-none-eabihf
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/02_device_enumeration target/thumbv7em-none-eabihf/release/examples/02_device_enumeration.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/02_device_enumeration.hex
 ```
 
 **Success indicator**: LED blinks slowly (fast blink = error)
@@ -58,73 +58,74 @@ These examples use:
 
 These examples demonstrate full device functionality and are more complex:
 
-### `enumerate_device.rs` - Full Device Enumeration
+### `05_multi_device_manager.rs` - Multi-Device Management
 
 Complete USB device enumeration with multi-device tracking:
 - Real-time device connection/disconnection monitoring
 - Device class identification (HID, Mass Storage, Audio, Hub)
+- String descriptor retrieval (vendor, product, serial)
 - Performance statistics and health monitoring
 
 ```bash
-cargo build --release --example enumerate_device
-cargo objcopy --release --example enumerate_device -- -O ihex enumerate_device.hex
-teensy_loader_cli --mcu=TEENSY41 -w enumerate_device.hex
+cargo build --release --example 05_multi_device_manager --target thumbv7em-none-eabihf
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/05_multi_device_manager target/thumbv7em-none-eabihf/release/examples/05_multi_device_manager.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/05_multi_device_manager.hex
 ```
 
 ### `03_qwerty_keyboard.rs` - USB Keyboard Support
 
-Full HID keyboard implementation with key mapping and modifiers:
-- Boot protocol for maximum compatibility
-- Complete USB keycode to ASCII conversion
-- Shift, Ctrl, Alt modifier support
-- Key repeat and N-key rollover
+HID keyboard implementation showing real keypresses:
+- Boot protocol initialization
+- Interrupt transfer monitoring
+- Real-time keypress detection
+- Activity display via LED and logging
 
 ```bash
-cargo build --release --example 03_qwerty_keyboard
-cargo objcopy --release --example 03_qwerty_keyboard -- -O ihex 03_qwerty_keyboard.hex
-teensy_loader_cli --mcu=TEENSY41 -w 03_qwerty_keyboard.hex
+cargo build --release --example 03_qwerty_keyboard --target thumbv7em-none-eabihf
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/03_qwerty_keyboard target/thumbv7em-none-eabihf/release/examples/03_qwerty_keyboard.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/03_qwerty_keyboard.hex
 ```
 
 ### `hid_gamepad.rs` - Game Controller Support
 
-Gamepad and joystick support:
-- Button mapping and state tracking
-- Analog stick and trigger processing
-- D-pad handling
-- Multi-controller support
+Gamepad and joystick support showing real input:
+- HID gamepad enumeration
+- Interrupt transfer for input data
+- Button press detection
+- Analog stick movement tracking
 
 ```bash
-cargo build --release --example hid_gamepad
-cargo objcopy --release --example hid_gamepad -- -O ihex hid_gamepad.hex
-teensy_loader_cli --mcu=TEENSY41 -w hid_gamepad.hex
+cargo build --release --example hid_gamepad --target thumbv7em-none-eabihf
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/hid_gamepad target/thumbv7em-none-eabihf/release/examples/hid_gamepad.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/hid_gamepad.hex
 ```
 
 ### `mass_storage.rs` - USB Flash Drive Support
 
 USB Mass Storage Class implementation (SCSI/BOT protocol):
-- SCSI command set (INQUIRY, READ_CAPACITY, READ_10, WRITE_10)
-- Block-level read/write operations
-- Error handling and recovery
-- Multi-LUN support
+- Mass storage device enumeration
+- SCSI INQUIRY and READ_CAPACITY commands
+- Device information display (capacity, vendor, product)
+- Bulk transfer setup
 
 ```bash
-cargo build --release --example mass_storage
-cargo objcopy --release --example mass_storage -- -O ihex mass_storage.hex
-teensy_loader_cli --mcu=TEENSY41 -w mass_storage.hex
+cargo build --release --example mass_storage --target thumbv7em-none-eabihf
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/mass_storage target/thumbv7em-none-eabihf/release/examples/mass_storage.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/mass_storage.hex
 ```
 
 ### `04_midi_keyboard.rs` - MIDI Device Support
 
-USB MIDI device implementation:
+USB MIDI device implementation showing real MIDI events:
 - USB MIDI packet parsing
 - 16-channel support
 - Note On/Off, Control Change, Program Change, Pitch Bend
-- Real-time event processing
+- Real-time event processing and display
 
 ```bash
-cargo build --release --example 04_midi_keyboard
-cargo objcopy --release --example 04_midi_keyboard -- -O ihex 04_midi_keyboard.hex
-teensy_loader_cli --mcu=TEENSY41 -w 04_midi_keyboard.hex
+cargo build --release --example 04_midi_keyboard --target thumbv7em-none-eabihf
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/04_midi_keyboard target/thumbv7em-none-eabihf/release/examples/04_midi_keyboard.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/04_midi_keyboard.hex
 ```
 
 ---
@@ -173,11 +174,11 @@ fn configure_usb_clocks() {
 ## Building and Testing
 
 ### Prerequisites
-- Rust toolchain with `thumbv7em-none-eabihf` target
+- Rust toolchain with `thumbv7em-none-eabihf` target (install with `rustup target add thumbv7em-none-eabihf`)
 - Teensy 4.0/4.1 development board
 - USB devices for testing (keyboard, flash drive, etc.)
-- `cargo-binutils` for creating hex files (install with `cargo install cargo-binutils`)
 - `llvm-tools-preview` component (install with `rustup component add llvm-tools-preview`)
+- Teensy Loader (download from [PJRC](https://www.pjrc.com/teensy/loader.html) or install CLI: `brew install teensy_loader_cli`)
 
 ### Build Examples
 
@@ -185,13 +186,13 @@ Build examples and create hex files for flashing:
 
 ```bash
 # Build specific example
-cargo build --release --example enumerate_device
+cargo build --release --example 03_qwerty_keyboard --target thumbv7em-none-eabihf
 
 # Convert to Intel hex format for flashing
-cargo objcopy --release --example enumerate_device -- -O ihex enumerate_device.hex
+rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/03_qwerty_keyboard target/thumbv7em-none-eabihf/release/examples/03_qwerty_keyboard.hex
 
 # Flash to Teensy using teensy_loader_cli
-teensy_loader_cli --mcu=TEENSY41 -w enumerate_device.hex
+teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/03_qwerty_keyboard.hex
 
 # Or use the Teensy Loader GUI application
 ```
@@ -199,7 +200,7 @@ teensy_loader_cli --mcu=TEENSY41 -w enumerate_device.hex
 Build all examples at once:
 
 ```bash
-cargo build --release --examples
+cargo build --release --examples --target thumbv7em-none-eabihf
 ```
 
 ### Hardware Setup
@@ -207,13 +208,18 @@ cargo build --release --examples
 #### Teensy 4.x USB Host Setup
 ```
 Teensy 4.x USB Host Connections:
-├── USB1_DN  (Pin 30) → USB D-
-├── USB1_DP  (Pin 31) → USB D+
-├── USB1_ID  (Pin 32) → Ground (host mode)
-└── 5V Power → VBUS (through switching circuit)
+├── USB2 (5-pin header, pins 30-32) → USB Host devices
+│   ├── USB2_DN  (Pin 30) → USB D-
+│   ├── USB2_DP  (Pin 31) → USB D+
+│   ├── USB2_ID  (Pin 32) → Ground (host mode)
+│   └── 5V Power → VBUS (through switching circuit)
+└── USB1 (micro USB) → Programming/Debugging
 ```
 
-**Important**: Ensure proper VBUS power switching for device power control.
+**Important**:
+- USB2 (pins 30-32) is used for USB Host functionality
+- USB1 (micro USB port) is used for programming and serial debugging
+- Ensure proper VBUS power switching for device power control
 
 ### Tested Devices
 
