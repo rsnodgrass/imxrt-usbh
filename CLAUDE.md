@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Production-ready USB host driver for i.MX RT1062 (Teensy 4.0/4.1) with EHCI controller. Embedded systems focus with real-time guarantees, cache coherency, and safety-first design.
 
-**Target**: ARM Cortex-M7 @ 600MHz with EHCI USB host controller
+**Target**: ARM Cortex-M7 @ 600MHz with EHCI USB host controller. Specifically Teensy 4.1
 
 ## Build Commands
 
@@ -63,6 +63,23 @@ teensy_loader_cli --mcu=TEENSY41 -w enumerate_device.hex
 # Or use Teensy Loader GUI application
 ```
 
+### Debugging
+
+```bash
+# Decode crash addresses from CrashReport (if using Teensy recovery features)
+arm-none-eabi-addr2line -e target/thumbv7em-none-eabihf/release/examples/enumerate_device <address>
+
+# View binary size breakdown
+cargo size --release --example enumerate_device -- -A
+
+# Examine memory sections and placement
+cargo readobj --release --example enumerate_device -- --section-headers
+```
+
+**Debugging Output:**
+- USB1 (micro USB) remains available for CDC serial even while USB2 runs host mode
+- Use `defmt` with RTT for zero-overhead logging without USB interference
+
 ## Architecture
 
 ### Core Module Structure
@@ -115,6 +132,22 @@ buffer.clean_cache();
 buffer.invalidate_cache();
 ```
 
+**Cache Line Alignment Requirements:**
+- DMA buffers must be 32-byte aligned (cache line size)
+- Buffer size must be multiple of 32 bytes
+- **Warning**: Invalidating unaligned buffers corrupts adjacent memory
+
+**DMA Buffer Placement Strategies (in order of preference):**
+
+1. **DTCM** (Best): Non-cacheable, no maintenance needed, fast CPU access
+2. **MPU-configured non-cacheable OCRAM**: Configure via MPU, good for large buffers
+3. **Cache-managed OCRAM**: Use clean/invalidate APIs, requires strict alignment
+
+**i.MX RT1062 Errata Considerations:**
+- Refer to NXP i.MX RT1060 Chip Errata document for silicon issues
+- Cache maintenance on Write-Through memory has known errata (avoid if possible)
+- Use DTCM or non-cacheable OCRAM for USB DMA operations
+
 ### Type-State Pattern
 
 EHCI controller uses compile-time state tracking:
@@ -126,11 +159,27 @@ EhciController<8, Uninitialized>  // Created but not initialized
 
 ## Hardware-Specific Details
 
+### i.MX RT1062 Memory Layout
+
+**FlexRAM (512 KB)** - Configurable as ITCM/DTCM/OCRAM:
+- **ITCM** (Instruction Tightly Coupled Memory): Ultra-fast code execution, non-cacheable
+- **DTCM** (Data Tightly Coupled Memory): Ultra-fast data access, non-cacheable, **preferred for DMA buffers**
+- Default allocation: 128KB ITCM, 128KB DTCM, 256KB OCRAM (configurable via linker)
+
+**OCRAM (512 KB)** - On-Chip RAM:
+- 64-bit data bus optimized for DMA access
+- **Cacheable by default** - requires MPU configuration or cache maintenance for DMA
+
+**Flash**: 1.9 MB program storage
+
+**Critical**: DMA buffers should be placed in DTCM (non-cacheable) or properly cache-managed OCRAM regions to avoid coherency issues.
+
 ### i.MX RT1062 USB Configuration
 
 - **USB1 Base**: 0x402E_0000 (typically USB Device on Teensy micro USB port)
 - **USB2 Base**: 0x402E_0200 (typically USB Host on Teensy pins 30/31)
 - **USBPHY1 Base**: 0x400D_9000
+- **USBPHY2 Base**: 0x400DA_000
 - **CCM Base**: 0x400F_C000 (clock control)
 
 ### USB Port Mapping (Teensy 4.1)
@@ -139,6 +188,21 @@ EhciController<8, Uninitialized>  // Created but not initialized
 - USB2 (pins 30/31): Host mode for connecting USB devices
 
 Examples use USB2 for host functionality, leaving USB1 for CDC serial output.
+
+### Teensy-Specific Hardware Constraints
+
+**Power:**
+- **3.3V logic only** - I/O pins are **NOT 5V tolerant**. Applying >3.3V to any pin causes permanent damage.
+- VIN accepts 3.6-6.0V external power (stay at 5V or below for safety)
+- **Critical**: If using VIN for external power, cut the VUSB-VIN trace on board bottom to prevent back-feeding USB port
+
+**Pin Limitations:**
+- All GPIO pulled down at reset for safe startup
+- Maximum pin current: 6.8 mA continuous per pin (per i.MX RT1062 spec)
+
+**Clock Domains:**
+- Base clock: 600 MHz (overclockable but not recommended for production)
+- LPSPI maximum reliable speed: 30 MHz (higher speeds risk setup/hold violations)
 
 ## Testing Strategy
 
@@ -198,6 +262,9 @@ bulk_manager.start_transfer(transfer_id, &mut controller)?;
 3. **Cache coherency**: Always clean before HW reads, invalidate before CPU reads
 4. **Interrupt safety**: Use critical sections when accessing shared state
 5. **Stack monitoring**: Built-in stack overflow detection with canaries
+6. **Voltage protection**: Never apply >3.3V to any Teensy I/O pin (not 5V tolerant)
+7. **Power inrush**: Large peripheral capacitors can delay startup; use powered USB hub or load switch for high-capacitance devices
+8. **Buffer alignment**: All DMA buffers must be 32-byte aligned with size as multiple of 32 bytes
 
 ## USB Timing Requirements
 
@@ -243,3 +310,233 @@ Optional:
 - Safety comments required for all `unsafe` blocks
 - Hardware register operations include timing comments
 - Error types include recovery guidance in documentation
+
+## Teensy 4.x Linker Configuration
+
+**Memory Regions (typical layout):**
+```
+FLASH:  0x6000_0000 - 0x601F_0000 (1.9 MB)
+ITCM:   0x0000_0000 - 0x0001_FFFF (128 KB)
+DTCM:   0x2000_0000 - 0x2001_FFFF (128 KB)
+OCRAM:  0x2020_0000 - 0x2023_FFFF (256 KB)
+```
+
+**Section Placement Best Practices:**
+- Critical interrupt handlers → ITCM (fastest execution)
+- DMA buffers → DTCM (non-cacheable, fast CPU access)
+- Large buffers → OCRAM with MPU configuration
+- Const data → Flash with PROGMEM attribute when space-constrained
+
+## Common Teensy 4.x Gotchas
+
+1. **FlexSPI**: Specialized for Flash/PSRAM with LUT configuration, not general-purpose SPI
+2. **EEPROM**: Emulated with wear-leveling; suitable for settings, not high-frequency logging
+3. **Clock configuration**: Changing clocks during USB operations causes instability
+
+## Critical Software Development Patterns
+
+### Memory Barriers for MMIO (Cortex-M7 Weak Ordering)
+
+ARM Cortex-M7 has weakly-ordered memory. **All** MMIO register access requires memory barriers:
+
+```rust
+// CORRECT: Register write with barriers
+pub fn write_register(addr: *mut u32, value: u32) {
+    unsafe {
+        cortex_m::asm::dmb();  // Data Memory Barrier before write
+        core::ptr::write_volatile(addr, value);
+        cortex_m::asm::dsb();  // Data Synchronization Barrier ensures completion
+    }
+}
+
+// CORRECT: Register read with barriers
+pub fn read_register(addr: *const u32) -> u32 {
+    unsafe {
+        cortex_m::asm::dmb();
+        let value = core::ptr::read_volatile(addr);
+        cortex_m::asm::dmb();
+        value
+    }
+}
+```
+
+**When to use barriers:**
+- Control register writes: `dmb()` before, `dsb()` after
+- Status register reads affecting control flow: `dmb()` before and after
+- Read-only capability registers: can omit barriers
+- After MPU/cache config changes: `dsb()` + `isb()`
+
+**Critical**: Missing `dsb()` after register write causes next instruction to execute before hardware sees write. Bug symptom: "works with debug prints, fails without them" (print adds delay).
+
+### Write-1-to-Clear Register Pattern
+
+Many i.MX RT1062 status registers use write-1-to-clear semantics:
+
+```rust
+// CORRECT: Clearing EHCI interrupt status
+let status = core::ptr::read_volatile(usbsts_addr);
+core::ptr::write_volatile(usbsts_addr, status);  // Write value back to clear
+
+// WRONG: Read-modify-write doesn't work for W1C registers
+let mut status = core::ptr::read_volatile(usbsts_addr);
+status &= !bit_to_clear;  // This has no effect on W1C registers!
+core::ptr::write_volatile(usbsts_addr, status);
+```
+
+**W1C registers:** USBSTS, PORTSC change bits, many CCM status registers
+
+### DMA Buffer Alignment (Hardware Requirement)
+
+```rust
+// CORRECT: 32-byte aligned DMA buffer
+#[repr(C, align(32))]
+pub struct DmaBuffer {
+    data: [u8; 512],  // Size must be multiple of 32
+}
+
+// CORRECT: Compile-time alignment validation
+const _: () = {
+    assert!(core::mem::align_of::<QueueTD>() == 32);
+    assert!(512 % 32 == 0);
+};
+```
+
+**Critical**: Invalidating unaligned cache buffers corrupts adjacent memory. All DMA buffers must be 32-byte aligned with size as multiple of 32 bytes.
+
+### Static Mut Alternatives
+
+Modern embedded Rust **never** uses `static mut`:
+
+```rust
+// CORRECT: AtomicBool for simple flags
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+// CORRECT: Mutex<RefCell<Option<T>>> for complex state
+use critical_section::Mutex;
+use core::cell::RefCell;
+
+static STATE: Mutex<RefCell<Option<ControllerState>>> =
+    Mutex::new(RefCell::new(None));
+
+pub fn access_state() {
+    critical_section::with(|cs| {
+        let mut state = STATE.borrow_ref_mut(cs);
+        // Access state safely
+    });
+}
+
+// WRONG: Never use static mut
+static mut COUNTER: u32 = 0;  // Data race! Undefined behavior!
+```
+
+### Atomic Ordering Guidelines
+
+```rust
+// CORRECT: Relaxed for CPU-only statistics
+self.stats.allocs.fetch_add(1, Ordering::Relaxed);
+
+// CORRECT: AcqRel for buffer allocation (shared state)
+self.allocated.compare_exchange(
+    false, true,
+    Ordering::AcqRel,   // Success ordering
+    Ordering::Acquire   // Failure ordering
+);
+
+// CORRECT: Release when freeing resource
+self.allocated.store(false, Ordering::Release);
+
+// WRONG: SeqCst everywhere wastes cycles
+self.stats.store(x, Ordering::SeqCst);  // Too strong for stats
+```
+
+**Guidelines:**
+- `Relaxed`: CPU-only counters, statistics
+- `Acquire/Release`: Most shared state (producer-consumer patterns)
+- `SeqCst`: Rarely needed, has performance cost
+
+### Precise Timing with DWT Cycle Counter
+
+```rust
+// CORRECT: DWT-based microsecond delay
+#[inline(always)]
+fn delay_us(us: u32) {
+    let start = cortex_m::peripheral::DWT::cycle_count();
+    let target = us * 600;  // CPU_FREQ_MHZ = 600
+
+    while cortex_m::peripheral::DWT::cycle_count()
+        .wrapping_sub(start) < target
+    {
+        cortex_m::asm::nop();
+    }
+}
+
+// WRONG: Loop-based delay - changes with optimization level
+for _ in 0..delay_count {  // Unreliable!
+    cortex_m::asm::nop();
+}
+```
+
+**Critical timings (from hardware spec):**
+- USB port reset: 20ms minimum assertion
+- PLL lock wait: 10ms timeout
+- Port power stabilization: 100ms
+
+### DMA Lifetime Safety
+
+```rust
+// CORRECT: Transfer guard ensures buffer outlives DMA
+pub struct TransferGuard<'buf> {
+    qtd: &'buf QueueTD,
+    _buffer: &'buf [u8],  // Lifetime ensures buffer not freed
+}
+
+impl Drop for TransferGuard<'_> {
+    fn drop(&mut self) {
+        // Wait for DMA completion before allowing buffer drop
+        while self.qtd.is_active() {
+            core::hint::spin_loop();
+        }
+    }
+}
+
+// CORRECT: Non-Copy buffer handle prevents aliasing
+pub struct DmaBuffer {
+    ptr: NonNull<u8>,
+    // NOT Copy or Clone
+}
+
+impl DmaBuffer {
+    pub fn free(self, pool: &mut BufferPool) {
+        pool.mark_free(self.pool_index);
+        // `self` consumed, can't be used again
+    }
+}
+```
+
+### Unsafe Block Documentation
+
+**All** unsafe blocks require detailed safety comments:
+
+```rust
+/// # Safety
+///
+/// Caller must ensure:
+/// - Buffer remains valid until transfer completes (check is_active())
+/// - Buffer in DMA-accessible memory (DTCM/OCRAM)
+/// - Buffer is 32-byte aligned
+/// - Buffer lifetime exceeds transfer duration
+pub unsafe fn init_transfer(&self, buffer: *const u8, len: usize) {
+    // Safety: Alignment validated by caller per contract above
+    unsafe {
+        core::ptr::write_volatile(self.buffer_addr.get(), buffer as u32);
+    }
+}
+```
+
+**Enforce globally:**
+```rust
+#![deny(unsafe_op_in_unsafe_fn)]
+```
+
+This forces explicit `unsafe {}` blocks inside unsafe functions, each with its own safety comment.
+- Make sure examples can be linked into a hex file using rust-objcopy that produces file which can be directly flashed to the Teensy.

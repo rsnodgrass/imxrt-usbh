@@ -90,11 +90,11 @@ To see detailed initialization messages:
 ## Additional Examples
 
 See the [`examples/`](examples/) directory for more advanced examples:
+- **`03_qwerty_keyboard.rs`** - USB keyboard support with full key mapping and modifiers
+- **`04_midi_keyboard.rs`** - MIDI device support with real-time event processing
 - **`enumerate_device.rs`** - Full device enumeration and management
-- **`hid_keyboard.rs`** - USB keyboard support with key mapping
 - **`hid_gamepad.rs`** - Game controller support
 - **`mass_storage.rs`** - USB flash drive support (SCSI/BOT protocol)
-- **`midi_keyboard.rs`** - MIDI device handling
 
 For detailed documentation, see [examples/README.md](examples/README.md).
 

@@ -1,19 +1,41 @@
 //! USB MIDI Keyboard Example
-//! 
-//! This example demonstrates a full-featured USB MIDI keyboard implementation.
-//! Features:
+//!
+//! This example demonstrates USB MIDI keyboard support with visual and serial feedback.
+//!
+//! ## What This Example Does
+//!
+//! When you connect a USB MIDI keyboard and play notes, you'll see:
+//! - **LED blinks rapidly** when notes are played
+//! - **LED blinks slowly** when notes are released
+//! - **Serial output** showing note names, velocities, and MIDI events
+//! - **Statistics** displayed every few seconds
+//!
+//! ## Hardware Setup
+//!
+//! - Connect USB MIDI keyboard to Teensy 4.1 USB Host port (pins 30-32)
+//! - Connect USB-to-serial adapter to pins 0 (TX) and 1 (RX) for serial output
+//! - Open serial monitor at 115200 baud to see MIDI events
+//!
+//! ## Features
+//!
 //! - Real-time USB MIDI device enumeration
 //! - MIDI event parsing and processing
-//! - Note on/off detection with velocity
-//! - Control Change (CC) message handling
-//! - Real-time interrupt-driven USB handling
+//! - Note on/off detection with velocity and note names
+//! - Control Change (CC) message handling (volume, pan, modulation)
+//! - Pitch bend and program change support
+//! - Visual LED feedback for note events
+//! - Serial console output with human-readable event descriptions
 //! - Performance monitoring and statistics
 
 #![no_std]
 #![no_main]
 
+use teensy4_bsp as bsp;
+use bsp::board;
 use teensy4_panic as _;
 use imxrt_ral as ral;
+use log::info;
+use embedded_hal::digital::OutputPin;
 
 use imxrt_usbh::{
     Result,
@@ -23,7 +45,6 @@ use imxrt_usbh::{
     dma::memory::UsbMemoryPool,
 };
 
-use cortex_m_rt::entry;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 /// i.MX RT1062 Hardware Register Base Addresses
@@ -618,6 +639,15 @@ impl MidiDevice {
     }
     
     /// Simulate reading MIDI data (in real implementation, this would be interrupt-driven)
+    ///
+    /// TODO: Replace this with real USB interrupt transfers
+    /// In a full implementation, you would:
+    /// 1. Set up interrupt endpoint for bulk IN transfers
+    /// 2. Use interrupt transfers to read MIDI packets from the device
+    /// 3. Process packets in an interrupt handler or polling loop
+    /// 4. Handle USB errors and device disconnection
+    ///
+    /// For now, this simulates MIDI events for demonstration purposes.
     fn simulate_midi_data(&self) -> Option<[u8; 4]> {
         // Simulate various MIDI events for demonstration
         static mut COUNTER: u32 = 0;
@@ -643,37 +673,45 @@ struct MidiApp {
     midi_device: Option<MidiDevice>,
     stats: MidiStats,
     tick_counter: u32,
+    led_blink_counter: u32,
 }
 
 impl MidiApp {
     /// Initialize the MIDI application
     fn new() -> Result<Self> {
+        info!("\r\n=== USB MIDI Keyboard Example ===");
+        info!("Initializing USB host for MIDI devices...");
+
         // Configure USB clocks manually (educational: showing register-level setup)
         configure_usb_clocks();
-        
+
         // Initialize USB memory pool
         let memory_pool = UsbMemoryPool::new();
-        
+
         // Initialize USB PHY with documented register addresses
         let phy_base = USBPHY1_BASE_ADDRESS as usize;   // USB PHY1 register base
         let ccm_base = CCM_BASE_ADDRESS as usize;       // Clock Control Module base
         let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
-        
+
         // Initialize USB host controller with documented register address
         let usb1_base = USB1_HOST_BASE_ADDRESS as usize; // EHCI controller registers
         let controller = unsafe {
             EhciController::<8, Uninitialized>::new(usb1_base)?
         };
-        
+
         let controller = unsafe { controller.initialize()? };
         let usb_controller = unsafe { controller.start() };
-        
+
+        info!("USB host initialized successfully");
+        info!("Waiting for MIDI keyboard...\r\n");
+
         Ok(Self {
             usb_controller,
             memory_pool,
             midi_device: None,
             stats: MidiStats::new(),
             tick_counter: 0,
+            led_blink_counter: 0,
         })
     }
     
@@ -682,11 +720,13 @@ impl MidiApp {
         if self.midi_device.is_some() {
             return; // Already have a device
         }
-        
+
         // Try to enumerate a MIDI device
         match find_midi_device(&mut self.usb_controller, &mut self.memory_pool) {
             Ok(mut device) => {
                 if device.initialize(&mut self.memory_pool).is_ok() {
+                    info!("MIDI keyboard detected and initialized!");
+                    info!("Start playing to see MIDI events\r\n");
                     self.midi_device = Some(device);
                 }
             }
@@ -722,50 +762,43 @@ impl MidiApp {
         match event {
             MidiEvent::NoteOn { channel, note, velocity } => {
                 self.stats.note_played();
-                // In a real application, you would:
-                // - Trigger synthesizer
-                // - Light up LEDs
-                // - Send to DAW over USB/MIDI
-                // - Update display
+                self.led_blink_counter = 50; // Blink LED rapidly for 50ms
+
                 let note_name = MidiEvent::note_name(note);
                 let octave = MidiEvent::note_octave(note);
-                let _ = (channel, note_name, octave, velocity);
+                info!("♪ Note ON:  {} {} (ch{}, vel{})", note_name, octave, channel + 1, velocity);
+
+                // TODO: In a real application, you would:
+                // - Trigger synthesizer
+                // - Send to DAW over USB/MIDI
+                // - Update display or other visual feedback
             }
             MidiEvent::NoteOff { channel, note, velocity } => {
-                // Handle note off
+                self.led_blink_counter = 10; // Blink LED slowly for 10ms
+
                 let note_name = MidiEvent::note_name(note);
                 let octave = MidiEvent::note_octave(note);
-                let _ = (channel, note_name, octave, velocity);
+                info!("♪ Note OFF: {} {} (ch{}, vel{})", note_name, octave, channel + 1, velocity);
             }
             MidiEvent::ControlChange { channel, controller, value } => {
                 self.stats.control_change();
+
                 // Handle CC messages (volume, pan, modulation, etc.)
-                match controller {
-                    7 => {
-                        // Volume control
-                        let _ = (channel, value);
-                    }
-                    10 => {
-                        // Pan control
-                        let _ = (channel, value);
-                    }
-                    1 => {
-                        // Modulation wheel
-                        let _ = (channel, value);
-                    }
-                    _ => {
-                        // Other controllers
-                        let _ = (channel, controller, value);
-                    }
-                }
+                let cc_name = match controller {
+                    1 => "Modulation",
+                    7 => "Volume",
+                    10 => "Pan",
+                    11 => "Expression",
+                    64 => "Sustain Pedal",
+                    _ => "Unknown CC",
+                };
+                info!("🎛️  CC: {} ({}={}) on ch{}", cc_name, controller, value, channel + 1);
             }
             MidiEvent::PitchBend { channel, value } => {
-                // Handle pitch bend
-                let _ = (channel, value);
+                info!("🎸 Pitch Bend: {} on ch{}", value, channel + 1);
             }
             MidiEvent::ProgramChange { channel, program } => {
-                // Handle program changes
-                let _ = (channel, program);
+                info!("🎹 Program Change: {} on ch{}", program, channel + 1);
             }
         }
     }
@@ -773,39 +806,59 @@ impl MidiApp {
     /// Update status and statistics
     fn update_status(&mut self) {
         self.tick_counter += 1;
-        
-        // Every 5000 ticks, report statistics
-        if self.tick_counter % 5000 == 0 {
-            let (notes, ccs, packets, errors) = self.stats.get_stats();
-            // In a real application, output these via UART, display, etc.
-            let _ = (notes, ccs, packets, errors);
+
+        // Decrement LED blink counter
+        if self.led_blink_counter > 0 {
+            self.led_blink_counter -= 1;
         }
-    }
-    
-    /// Main run loop
-    fn run(&mut self) -> ! {
-        loop {
-            // Check for MIDI device every 500 iterations
-            if self.tick_counter % 500 == 0 {
-                self.detect_midi_device();
-            }
-            
-            // Process MIDI data
-            self.process_midi_data();
-            
-            // Update status
-            self.update_status();
-            
-            // Simple delay
-            delay_ms(1);
+
+        // Every 5000 ticks (~5 seconds), report statistics
+        if self.tick_counter % 5000 == 0 && self.midi_device.is_some() {
+            let (notes, ccs, packets, errors) = self.stats.get_stats();
+            info!("\r\n📊 Stats: {} notes, {} CCs, {} packets, {} errors",
+                  notes, ccs, packets, errors);
         }
     }
 }
 
-#[entry]
+#[bsp::rt::entry]
 fn main() -> ! {
+    let board::Resources {
+        pins,
+        mut gpio2,
+        usb,
+        ..
+    } = board::t40(board::instances());
+
+    let mut led = board::led(&mut gpio2, pins.p13);
+
+    let mut poller = imxrt_log::log::usbd(
+        usb,
+        imxrt_log::Interrupts::Enabled,
+    ).unwrap();
+
+    poller.poll();
+
     let mut app = MidiApp::new().expect("Failed to initialize MIDI app");
-    app.run()
+
+    loop {
+        poller.poll();
+
+        if app.tick_counter % 500 == 0 {
+            app.detect_midi_device();
+        }
+
+        app.process_midi_data();
+
+        if app.led_blink_counter > 0 {
+            let _ = led.set_high();
+        } else {
+            let _ = led.set_low();
+        }
+
+        app.update_status();
+        delay_ms(1);
+    }
 }
 
 

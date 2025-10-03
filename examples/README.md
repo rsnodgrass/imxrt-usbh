@@ -71,7 +71,7 @@ cargo objcopy --release --example enumerate_device -- -O ihex enumerate_device.h
 teensy_loader_cli --mcu=TEENSY41 -w enumerate_device.hex
 ```
 
-### `hid_keyboard.rs` - USB Keyboard Support
+### `03_qwerty_keyboard.rs` - USB Keyboard Support
 
 Full HID keyboard implementation with key mapping and modifiers:
 - Boot protocol for maximum compatibility
@@ -80,9 +80,9 @@ Full HID keyboard implementation with key mapping and modifiers:
 - Key repeat and N-key rollover
 
 ```bash
-cargo build --release --example hid_keyboard
-cargo objcopy --release --example hid_keyboard -- -O ihex hid_keyboard.hex
-teensy_loader_cli --mcu=TEENSY41 -w hid_keyboard.hex
+cargo build --release --example 03_qwerty_keyboard
+cargo objcopy --release --example 03_qwerty_keyboard -- -O ihex 03_qwerty_keyboard.hex
+teensy_loader_cli --mcu=TEENSY41 -w 03_qwerty_keyboard.hex
 ```
 
 ### `hid_gamepad.rs` - Game Controller Support
@@ -113,7 +113,7 @@ cargo objcopy --release --example mass_storage -- -O ihex mass_storage.hex
 teensy_loader_cli --mcu=TEENSY41 -w mass_storage.hex
 ```
 
-### `midi_keyboard.rs` - MIDI Device Support
+### `04_midi_keyboard.rs` - MIDI Device Support
 
 USB MIDI device implementation:
 - USB MIDI packet parsing
@@ -122,9 +122,9 @@ USB MIDI device implementation:
 - Real-time event processing
 
 ```bash
-cargo build --release --example midi_keyboard
-cargo objcopy --release --example midi_keyboard -- -O ihex midi_keyboard.hex
-teensy_loader_cli --mcu=TEENSY41 -w midi_keyboard.hex
+cargo build --release --example 04_midi_keyboard
+cargo objcopy --release --example 04_midi_keyboard -- -O ihex 04_midi_keyboard.hex
+teensy_loader_cli --mcu=TEENSY41 -w 04_midi_keyboard.hex
 ```
 
 ---

@@ -13,9 +13,11 @@
 #![no_std]
 #![no_main]
 
+use teensy4_bsp as bsp;
+use bsp::board;
 use teensy4_panic as _;
-use cortex_m_rt::entry;
 use imxrt_ral as ral;
+use log::info;
 
 use imxrt_usbh::{
     Result, UsbError,
@@ -595,32 +597,62 @@ impl SimpleApp {
     fn handle_keyboard_events<const N: usize>(&self, events: heapless::Vec<KeyboardEvent, N>) {
         for event in events {
             self.stats.keypress();
-            
+
             match event {
                 KeyboardEvent::KeyPress { keycode, modifiers } => {
+                    // Convert keycode to ASCII and log it
                     if let Some(ch) = keycode_to_ascii(keycode, (modifiers & 0x22) != 0) {
                         self.stats.character();
                         if ch == ' ' {
                             self.stats.word();
                         }
-                        
-                        // In a real app, output character via UART, USB CDC, display, etc.
-                        let _ = ch;
+
+                        // Output the character to serial
+                        if ch.is_ascii_graphic() || ch == ' ' {
+                            info!("⌨️  Key: '{}' (0x{:02X})", ch, keycode);
+                        } else {
+                            info!("⌨️  Key: <{:?}> (0x{:02X})", ch as u8, keycode);
+                        }
+                    } else {
+                        // Non-ASCII keys (arrows, function keys, etc.)
+                        let key_name = match keycode {
+                            0x28 => "Enter",
+                            0x29 => "Escape",
+                            0x2A => "Backspace",
+                            0x2B => "Tab",
+                            0x4F => "Right Arrow",
+                            0x50 => "Left Arrow",
+                            0x51 => "Down Arrow",
+                            0x52 => "Up Arrow",
+                            _ => "Special",
+                        };
+                        info!("⌨️  Key: <{}> (0x{:02X})", key_name, keycode);
                     }
-                    
-                    // Handle control combinations
-                    if (modifiers & 0x11) != 0 { // Ctrl pressed
-                        // Handle Ctrl+key combinations
-                        let _ = keycode;
+
+                    // Log modifier keys
+                    if modifiers != 0 {
+                        let mut mods = heapless::String::<32>::new();
+                        if (modifiers & 0x11) != 0 { let _ = mods.push_str("Ctrl "); }
+                        if (modifiers & 0x22) != 0 { let _ = mods.push_str("Shift "); }
+                        if (modifiers & 0x44) != 0 { let _ = mods.push_str("Alt "); }
+                        if (modifiers & 0x88) != 0 { let _ = mods.push_str("GUI "); }
+                        info!("     Modifiers: {}", mods.as_str());
                     }
                 }
                 KeyboardEvent::KeyRepeat { keycode, modifiers } => {
-                    // Handle key repeat
-                    let _ = (keycode, modifiers);
+                    // Log key repeats
+                    if let Some(ch) = keycode_to_ascii(keycode, (modifiers & 0x22) != 0) {
+                        if ch.is_ascii_graphic() || ch == ' ' {
+                            info!("🔁 Repeat: '{}'", ch);
+                        }
+                    }
                 }
                 KeyboardEvent::ModifierChange { old_modifiers, new_modifiers } => {
-                    // Handle modifier changes
-                    let _ = (old_modifiers, new_modifiers);
+                    if new_modifiers > old_modifiers {
+                        info!("⬆️  Modifier pressed: 0x{:02X}", new_modifiers);
+                    } else {
+                        info!("⬇️  Modifier released: 0x{:02X}", old_modifiers);
+                    }
                 }
                 _ => {}
             }
@@ -629,43 +661,50 @@ impl SimpleApp {
     
     fn update_status(&mut self) {
         self.led_counter += 1;
-        
+
         // Every 5 seconds, update statistics
-        if self.led_counter % 5000 == 0 {
+        if self.led_counter % 5000 == 0 && self.keyboard.is_some() {
             let current_time = SYSTEM_COUNTER.load(Ordering::Relaxed);
             let wpm = self.stats.get_wpm(current_time);
             let keypresses = self.stats.total_keypresses.load(Ordering::Relaxed);
             let characters = self.stats.characters_typed.load(Ordering::Relaxed);
-            
-            // In a real app, display statistics
-            let _ = (wpm, keypresses, characters);
+            let words = self.stats.words_typed.load(Ordering::Relaxed);
+
+            info!("\r\n📊 Stats: {} WPM | {} keys | {} chars | {} words",
+                  wpm, keypresses, characters, words);
         }
     }
     
-    fn run(&mut self) -> ! {
-        loop {
-            // Increment system counter (simulate time)
-            SYSTEM_COUNTER.fetch_add(1, Ordering::Relaxed);
-            
-            // Device detection
-            self.detect_keyboard();
-            
-            // Process keyboard input
-            self.process_keyboard();
-            
-            // Update status
-            self.update_status();
-            
-            // Simple delay
-            delay_ms(1);
-        }
-    }
 }
 
-#[entry]
+#[bsp::rt::entry]
 fn main() -> ! {
+    let board::Resources {
+        usb,
+        ..
+    } = board::t40(board::instances());
+
+    let mut poller = imxrt_log::log::usbd(
+        usb,
+        imxrt_log::Interrupts::Enabled,
+    ).unwrap();
+
+    poller.poll();
+
+    info!("\r\n=== USB HID Keyboard Example ===");
+    info!("Initializing USB host for keyboard...\r\n");
+    poller.poll();
+
     let mut app = SimpleApp::new().expect("Failed to initialize USB keyboard app");
-    app.run()
+
+    loop {
+        poller.poll();
+        SYSTEM_COUNTER.fetch_add(1, Ordering::Relaxed);
+        app.detect_keyboard();
+        app.process_keyboard();
+        app.update_status();
+        delay_ms(1);
+    }
 }
 
 /// Configure USB clocks for i.MX RT1062
