@@ -3,7 +3,6 @@
 //! EHCI periodic schedule uses a 1024-entry frame list for time-sensitive transfers.
 //! Each entry can point to Queue Heads (for interrupt) or iTD/siTD (for isochronous).
 
-use crate::ehci::qh::QueueHead;
 use crate::error::{Result, UsbError};
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -11,9 +10,12 @@ use core::sync::atomic::{AtomicU32, Ordering};
 pub const FRAME_LIST_SIZE: usize = 1024;
 
 /// Frame list entry type bits (bits 2:1)
+#[allow(dead_code)]
 const TYPE_ITD: u32 = 0 << 1;
 const TYPE_QH: u32 = 1 << 1;
+#[allow(dead_code)]
 const TYPE_SITD: u32 = 2 << 1;
+#[allow(dead_code)]
 const TYPE_FSTN: u32 = 3 << 1;
 
 /// Terminate bit

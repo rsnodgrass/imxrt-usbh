@@ -568,7 +568,7 @@ impl TransferExecutor {
     /// Unlink QH from periodic schedule
     fn unlink_qh_from_periodic_schedule(
         &mut self,
-        qh_handle: &QhHandle,
+        _qh_handle: &QhHandle,
         interval: u32,
     ) -> Result<()> {
         let frame_list = unsafe { super::periodic::get_frame_list() };
