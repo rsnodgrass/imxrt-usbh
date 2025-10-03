@@ -14,20 +14,16 @@
 #![no_std]
 #![no_main]
 
-use cortex_m_rt::entry;
+use bsp::board;
+use log::info;
+use teensy4_bsp as bsp;
 use teensy4_panic as _;
 
-use imxrt_ral as ral;
-
 use imxrt_usbh::{
-    dma::memory::UsbMemoryPool,
-    ehci::{
-        controller::{EhciController, Running, Uninitialized},
-        TransferExecutor,
-    },
-    enumeration::{DeviceClass, DeviceEnumerator, EnumeratedDevice},
+    dma::UsbMemoryPool,
+    ehci::{EhciController, Running, TransferExecutor, Uninitialized},
+    enumeration::{DeviceClass, DeviceEnumerator},
     phy::UsbPhy,
-    transfer::simple_control::{ControlExecutor, SetupPacket},
     Result, UsbError,
 };
 
@@ -591,214 +587,126 @@ pub fn format_capacity(bytes: u64) -> (f32, &'static str) {
     (size, UNITS[unit_index])
 }
 
-#[entry]
+#[bsp::rt::entry]
 fn main() -> ! {
-    // Initialize peripherals
-    let _peripherals = unsafe { ral::Instances::instances() };
+    let board::Resources {
+        pins,
+        mut gpio2,
+        usb,
+        ..
+    } = board::t40(board::instances());
 
-    // Initialize clocks
-    configure_usb_clocks();
+    let led = board::led(&mut gpio2, pins.p13);
 
-    // Initialize USB memory pool
-    let mut memory_pool = UsbMemoryPool::new();
+    // USB CDC logging
+    let mut poller = imxrt_log::log::usbd(usb, imxrt_log::Interrupts::Enabled).unwrap();
 
-    // Initialize USB PHY
-    let phy_base = 0x400D_9000; // USBPHY1 base address
-    let ccm_base = 0x400F_C000; // CCM base address
-    let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
+    info!("\r\n=== USB Mass Storage Example ===");
+    poller.poll();
 
-    // Initialize USB host controller (USB2 for host, USB1 for device/debug)
-    let usb2_base = 0x402E_0200; // USB2 EHCI controller
+    // Initialize USB PHY for host mode
+    info!("Initializing USB PHY...");
+    poller.poll();
+
+    let mut phy = unsafe { UsbPhy::new(0x400DA000, 0x400F_C000) };
+
+    if phy.init_host_mode().is_err() {
+        info!("✗ PHY init failed!");
+        poller.poll();
+        loop {
+            led.toggle();
+            cortex_m::asm::delay(60_000_000);
+        }
+    }
+
+    info!("✓ USB PHY initialized");
+    poller.poll();
+
+    // Initialize EHCI controller (USB2 for host)
     let controller = unsafe {
-        EhciController::<8, Uninitialized>::new(usb2_base)
-            .expect("Failed to create EHCI controller")
+        match EhciController::<8, Uninitialized>::new(0x402E_0200) {
+            Ok(c) => c,
+            Err(_) => {
+                info!("✗ EHCI init failed!");
+                poller.poll();
+                loop {
+                    led.toggle();
+                    cortex_m::asm::delay(60_000_000);
+                }
+            }
+        }
     };
 
-    let controller = unsafe {
-        controller
-            .initialize()
-            .expect("Failed to initialize EHCI controller")
-    };
-
+    let controller = unsafe { controller.initialize().unwrap() };
     let mut controller = unsafe { controller.start() };
 
-    // Initialize transfer executor
-    let mut transfer_executor = unsafe { TransferExecutor::new(usb2_base) };
+    info!("✓ USB host controller running");
+    poller.poll();
 
-    // Initialize MSC manager
-    let mut msc_manager = MscManager::new();
+    // Initialize memory pool and transfer executor
+    let mut memory_pool = UsbMemoryPool::new();
+    let mut transfer_executor = unsafe { TransferExecutor::new(0x402E_0200) };
 
-    // Main loop
+    info!("\r\nWaiting for flash drive...");
+    poller.poll();
+
     let mut device_connected = false;
+    let mut counter = 0u32;
 
     loop {
-        if !device_connected {
-            // Try to find and connect to a mass storage device
-            match find_and_init_flash_drive(
-                &mut controller,
-                &mut memory_pool,
-                &mut transfer_executor,
-            ) {
-                Ok(device) => {
-                    match msc_manager.add_device(device) {
-                        Ok(device_id) => {
-                            device_connected = true;
-                            demonstrate_flash_operations(
-                                device_id,
-                                &mut msc_manager,
-                                &mut memory_pool,
-                            );
-                        }
-                        Err(_) => {
-                            // Manager full
-                        }
+        poller.poll();
+        counter += 1;
+
+        if !device_connected && counter % 1000 == 0 {
+            // Try to enumerate flash drive
+            let mut enumerator =
+                DeviceEnumerator::new(&mut controller, &mut memory_pool, &mut transfer_executor);
+
+            if let Ok(device) = enumerator.enumerate_device() {
+                if device.class == DeviceClass::MassStorage {
+                    info!("\r\n✓ Mass Storage Device detected!");
+                    info!("  Address: {}", device.address);
+                    poller.poll();
+
+                    // Create mass storage device
+                    let mut msc_device = MassStorageDevice::new(
+                        device.address,
+                        0,    // Interface 0
+                        0x81, // Bulk IN endpoint
+                        0x02, // Bulk OUT endpoint
+                        64,   // Max packet size IN
+                        64,   // Max packet size OUT
+                        0,    // Max LUN
+                        subclass::SCSI,
+                        protocol::BULK_ONLY,
+                    );
+
+                    // Initialize the device
+                    if msc_device.initialize(&mut memory_pool).is_ok() {
+                        info!("✓ Mass storage initialized");
+
+                        let capacity = msc_device.get_capacity_bytes();
+                        let (size, unit) = format_capacity(capacity);
+                        info!("  Capacity: {:.2} {}", size, unit);
+                        info!("  Vendor: {}", msc_device.get_vendor_id());
+                        info!("  Product: {}", msc_device.get_product_id());
+                        poller.poll();
+
+                        device_connected = true;
+                        led.clear();
+
+                        info!("\r\nFlash drive ready!");
+                        poller.poll();
                     }
                 }
-                Err(_) => {
-                    // No flash drive found
-                }
             }
         }
 
-        // Small delay
-        delay_ms(100);
-    }
-}
-
-/// Find and initialize a USB flash drive
-fn find_and_init_flash_drive(
-    controller: &mut EhciController<8, Running>,
-    memory_pool: &mut UsbMemoryPool,
-    transfer_executor: &mut TransferExecutor,
-) -> Result<MassStorageDevice> {
-    // Enumerate device
-    let mut enumerator = DeviceEnumerator::new(controller, memory_pool, transfer_executor);
-    let device = enumerator.enumerate_device()?;
-
-    // Check if it's a mass storage device
-    if device.class != DeviceClass::MassStorage {
-        return Err(UsbError::Unsupported);
-    }
-
-    // Create mass storage device
-    let mut msc_device = MassStorageDevice::new(
-        device.address,
-        0,    // Interface 0
-        0x81, // Bulk IN endpoint
-        0x02, // Bulk OUT endpoint
-        64,   // Max packet size IN
-        64,   // Max packet size OUT
-        0,    // Max LUN
-        subclass::SCSI,
-        protocol::BULK_ONLY,
-    );
-
-    // Initialize the device
-    msc_device.initialize(memory_pool)?;
-
-    Ok(msc_device)
-}
-
-/// Demonstrate flash drive operations
-fn demonstrate_flash_operations(
-    device_id: u8,
-    manager: &mut MscManager,
-    memory_pool: &mut UsbMemoryPool,
-) {
-    if let Some(device) = manager.get_device_mut(device_id) {
-        // Display device information
-        let capacity = device.get_capacity_bytes();
-        let (size, unit) = format_capacity(capacity);
-
-        // In a real app, you would output this information
-        let _vendor = device.get_vendor_id();
-        let _product = device.get_product_id();
-        let _size = size;
-        let _unit = unit;
-
-        // Demonstrate reading first block
-        let mut buffer = [0u8; 512];
-        match device.read_blocks(0, 1, &mut buffer, memory_pool) {
-            Ok(_bytes_read) => {
-                // Successfully read block 0
-                // In a real app, you would process this data
-                process_boot_sector(&buffer);
-            }
-            Err(_e) => {
-                // Read failed
-            }
+        // Blink LED
+        if counter % 300_000 == 0 {
+            led.toggle();
         }
 
-        // Demonstrate writing (be careful with real devices!)
-        let write_data = [0x55u8; 512]; // Test pattern
-        match device.write_blocks(1000, 1, &write_data, memory_pool) {
-            Ok(_bytes_written) => {
-                // Successfully wrote to LBA 1000
-                // Verify by reading back
-                let mut verify_buffer = [0u8; 512];
-                if device
-                    .read_blocks(1000, 1, &mut verify_buffer, memory_pool)
-                    .is_ok()
-                {
-                    // Verify the data matches
-                    let matches = verify_buffer.iter().all(|&b| b == 0x55);
-                    let _ = matches; // In real app, report verification result
-                }
-            }
-            Err(_e) => {
-                // Write failed
-            }
-        }
+        cortex_m::asm::delay(1000);
     }
-}
-
-/// Process boot sector (for educational purposes)
-fn process_boot_sector(buffer: &[u8; 512]) {
-    // Check for FAT boot sector signature
-    if buffer[510] == 0x55 && buffer[511] == 0xAA {
-        // This looks like a boot sector
-        // In a real app, you could parse FAT32/exFAT headers here
-        let _boot_signature = true;
-    }
-
-    // In a real filesystem implementation, you would:
-    // 1. Parse the boot sector to get filesystem parameters
-    // 2. Read the FAT (File Allocation Table)
-    // 3. Navigate directories and files
-    // 4. Implement file operations
-}
-
-/// Configure USB clocks for i.MX RT1062
-fn configure_usb_clocks() {
-    use ral::{modify_reg, read_reg};
-
-    unsafe {
-        let ccm = ral::ccm::CCM::instance();
-
-        // Enable USB clocks
-        modify_reg!(ral::ccm, ccm, CCGR6,
-            CG0: 0b11,  // usb_ctrl1_clk
-            CG1: 0b11,  // usb_ctrl2_clk
-            CG2: 0b11,  // usb_phy1_clk
-            CG3: 0b11   // usb_phy2_clk
-        );
-
-        // Configure USB PHY PLL (480MHz)
-        let analog = ral::ccm_analog::CCM_ANALOG::instance();
-
-        // Power up PLL
-        modify_reg!(ral::ccm_analog, analog, PLL_USB1,
-            POWER: 1,
-            ENABLE: 1,
-            EN_USB_CLKS: 1
-        );
-
-        // Wait for PLL lock
-        while read_reg!(ral::ccm_analog, analog, PLL_USB1, LOCK) == 0 {}
-    }
-}
-
-/// Simple delay function
-fn delay_ms(ms: u32) {
-    cortex_m::asm::delay(600_000 * ms); // Assuming 600MHz clock
 }

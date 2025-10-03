@@ -14,20 +14,18 @@
 #![no_std]
 #![no_main]
 
-use cortex_m_rt::entry;
+use bsp::board;
+use log::info;
+use teensy4_bsp as bsp;
 use teensy4_panic as _;
 
-use imxrt_ral as ral;
-
 use imxrt_usbh::{
-    dma::memory::UsbMemoryPool,
-    ehci::{
-        controller::{EhciController, Running, Uninitialized},
-        TransferExecutor,
-    },
-    enumeration::{DeviceClass, DeviceEnumerator, EnumeratedDevice},
+    dma::UsbMemoryPool,
+    ehci::{EhciController, Running, TransferExecutor, Uninitialized},
+    enumeration::{DeviceClass, DeviceEnumerator},
     phy::UsbPhy,
     transfer::simple_control::{ControlExecutor, SetupPacket},
+    transfer::{Direction, InterruptTransferManager},
     Result, UsbError,
 };
 
@@ -435,163 +433,160 @@ impl HidManager {
     }
 }
 
-#[entry]
+#[bsp::rt::entry]
 fn main() -> ! {
-    // Initialize peripherals
-    let _peripherals = unsafe { ral::Instances::instances() };
+    let board::Resources {
+        pins,
+        mut gpio2,
+        usb,
+        ..
+    } = board::t40(board::instances());
 
-    // Initialize clocks
-    configure_usb_clocks();
+    let led = board::led(&mut gpio2, pins.p13);
 
-    // Initialize USB memory pool
-    let mut memory_pool = UsbMemoryPool::new();
+    // USB CDC logging
+    let mut poller = imxrt_log::log::usbd(usb, imxrt_log::Interrupts::Enabled).unwrap();
 
-    // Initialize USB PHY
-    let phy_base = 0x400D_9000; // USBPHY1 base address
-    let ccm_base = 0x400F_C000; // CCM base address
-    let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
+    info!("\r\n=== USB HID Gamepad Example ===");
+    poller.poll();
 
-    // Initialize USB host controller (USB2 for host, USB1 for device/debug)
-    let usb2_base = 0x402E_0200; // USB2 EHCI controller
+    // Initialize USB PHY for host mode
+    info!("Initializing USB PHY...");
+    poller.poll();
+
+    let mut phy = unsafe { UsbPhy::new(0x400DA000, 0x400F_C000) };
+
+    if phy.init_host_mode().is_err() {
+        info!("✗ PHY init failed!");
+        poller.poll();
+        loop {
+            led.toggle();
+            cortex_m::asm::delay(60_000_000);
+        }
+    }
+
+    info!("✓ USB PHY initialized");
+    poller.poll();
+
+    // Initialize EHCI controller (USB2 for host)
     let controller = unsafe {
-        EhciController::<8, Uninitialized>::new(usb2_base)
-            .expect("Failed to create EHCI controller")
+        match EhciController::<8, Uninitialized>::new(0x402E_0200) {
+            Ok(c) => c,
+            Err(_) => {
+                info!("✗ EHCI init failed!");
+                poller.poll();
+                loop {
+                    led.toggle();
+                    cortex_m::asm::delay(60_000_000);
+                }
+            }
+        }
     };
 
-    let controller = unsafe {
-        controller
-            .initialize()
-            .expect("Failed to initialize EHCI controller")
-    };
-
+    let controller = unsafe { controller.initialize().unwrap() };
     let mut controller = unsafe { controller.start() };
 
-    // Initialize transfer executor
-    let mut transfer_executor = unsafe { TransferExecutor::new(usb2_base) };
+    info!("✓ USB host controller running");
+    poller.poll();
 
-    // Initialize HID manager
-    let mut hid_manager = HidManager::new();
+    // Initialize memory pool and transfer executor
+    let mut memory_pool = UsbMemoryPool::new();
+    let mut transfer_executor = unsafe { TransferExecutor::new(0x402E_0200) };
 
-    // Main loop
-    let mut device_connected = false;
+    info!("\r\nWaiting for gamepad...");
+    poller.poll();
+
+    let mut gamepad_detected = false;
+    let mut counter = 0u32;
 
     loop {
-        if !device_connected {
-            // Try to find and connect to a gamepad
-            match find_and_init_gamepad(&mut controller, &mut memory_pool, &mut transfer_executor) {
-                Ok(gamepad) => {
-                    match hid_manager.register_gamepad(gamepad) {
-                        Ok(index) => {
-                            device_connected = true;
-                            // In a real app, you'd start interrupt transfers here
-                            let _ = index;
-                        }
-                        Err(_) => {
-                            // Manager full
+        poller.poll();
+        counter += 1;
+
+        if !gamepad_detected && counter % 1000 == 0 {
+            // Try to enumerate gamepad
+            let mut enumerator =
+                DeviceEnumerator::new(&mut controller, &mut memory_pool, &mut transfer_executor);
+
+            if let Ok(device) = enumerator.enumerate_device() {
+                if device.class == DeviceClass::Hid {
+                    info!("\r\n✓ HID Gamepad detected!");
+                    info!("  Address: {}", device.address);
+                    poller.poll();
+
+                    // Create gamepad driver
+                    let mut gamepad = HidGamepad::new(
+                        device.address,
+                        0,    // Interface 0
+                        0x81, // Endpoint 1 IN
+                        8,    // Max packet size
+                        10,   // 10ms poll interval
+                    );
+
+                    // Initialize gamepad (set idle rate)
+                    if gamepad
+                        .initialize(&mut transfer_executor, &mut memory_pool)
+                        .is_ok()
+                    {
+                        info!("✓ Gamepad initialized");
+                        poller.poll();
+                        gamepad_detected = true;
+
+                        // Set up interrupt transfer for gamepad input
+                        let mut interrupt_mgr = InterruptTransferManager::<4>::new();
+
+                        if let Some(buffer) = memory_pool.alloc_buffer(8) {
+                            match interrupt_mgr.submit(
+                                Direction::In,
+                                device.address,
+                                0x81,
+                                8,
+                                buffer,
+                                10,
+                                true,
+                            ) {
+                                Ok(transfer_id) => {
+                                    info!("✓ Interrupt transfer started");
+                                    info!("\r\nGamepad ready! Press buttons...\r\n");
+                                    poller.poll();
+
+                                    // Monitor gamepad input
+                                    let mut last_bytes = 0u32;
+                                    loop {
+                                        poller.poll();
+
+                                        if let Some(transfer) =
+                                            interrupt_mgr.get_transfer(transfer_id)
+                                        {
+                                            let current_bytes = transfer.bytes_transferred();
+
+                                            if transfer.is_complete() && current_bytes != last_bytes
+                                            {
+                                                info!("Gamepad input: {} bytes", current_bytes);
+                                                last_bytes = current_bytes;
+                                                led.toggle();
+                                            }
+                                        }
+
+                                        cortex_m::asm::delay(10000);
+                                    }
+                                }
+                                Err(_) => {
+                                    info!("✗ Failed to start interrupt transfer");
+                                    poller.poll();
+                                }
+                            }
                         }
                     }
-                }
-                Err(_) => {
-                    // No gamepad found
                 }
             }
         }
 
-        // Process events
-        while let Some((gamepad_id, event)) = hid_manager.get_next_event() {
-            handle_gamepad_event(gamepad_id, event, &hid_manager);
+        // Blink LED
+        if counter % 300_000 == 0 {
+            led.toggle();
         }
 
-        // Small delay
-        delay_ms(10);
+        cortex_m::asm::delay(1000);
     }
-}
-
-/// Find and initialize a USB gamepad
-fn find_and_init_gamepad(
-    controller: &mut EhciController<8, Running>,
-    memory_pool: &mut UsbMemoryPool,
-    transfer_executor: &mut TransferExecutor,
-) -> Result<HidGamepad> {
-    // Enumerate device
-    let mut enumerator = DeviceEnumerator::new(controller, memory_pool, transfer_executor);
-    let device = enumerator.enumerate_device()?;
-
-    // Check if it's a HID device
-    if device.class != DeviceClass::Hid {
-        return Err(UsbError::Unsupported);
-    }
-
-    // Create gamepad driver
-    let mut gamepad = HidGamepad::new(
-        device.address,
-        0,    // Interface 0
-        0x81, // Endpoint 1 IN
-        8,    // Max packet size
-        10,   // 10ms poll interval
-    );
-
-    // Initialize the gamepad
-    gamepad.initialize(transfer_executor, memory_pool)?;
-
-    Ok(gamepad)
-}
-
-/// Handle gamepad events
-fn handle_gamepad_event(gamepad_id: u8, event: GamepadEvent, _manager: &HidManager) {
-    match event {
-        GamepadEvent::ButtonPress(button) => {
-            // Handle button press
-            // In a real app: trigger actions, update game state, etc.
-            let _ = (gamepad_id, button);
-        }
-        GamepadEvent::ButtonRelease(button) => {
-            // Handle button release
-            let _ = (gamepad_id, button);
-        }
-        GamepadEvent::LeftStickMove(x, y) => {
-            // Handle stick movement
-            // In a real app: move character, control camera, etc.
-            let _ = (gamepad_id, x, y);
-        }
-        GamepadEvent::RightStickMove(x, y) => {
-            // Handle right stick movement
-            let _ = (gamepad_id, x, y);
-        }
-    }
-}
-
-/// Configure USB clocks for i.MX RT1062
-fn configure_usb_clocks() {
-    use ral::{modify_reg, read_reg};
-
-    unsafe {
-        let ccm = ral::ccm::CCM::instance();
-
-        // Enable USB clocks
-        modify_reg!(ral::ccm, ccm, CCGR6,
-            CG0: 0b11,  // usb_ctrl1_clk
-            CG1: 0b11,  // usb_ctrl2_clk
-            CG2: 0b11,  // usb_phy1_clk
-            CG3: 0b11   // usb_phy2_clk
-        );
-
-        // Configure USB PHY PLL (480MHz)
-        let analog = ral::ccm_analog::CCM_ANALOG::instance();
-
-        // Power up PLL
-        modify_reg!(ral::ccm_analog, analog, PLL_USB1,
-            POWER: 1,
-            ENABLE: 1,
-            EN_USB_CLKS: 1
-        );
-
-        // Wait for PLL lock
-        while read_reg!(ral::ccm_analog, analog, PLL_USB1, LOCK) == 0 {}
-    }
-}
-
-/// Simple delay function
-fn delay_ms(ms: u32) {
-    cortex_m::asm::delay(600_000 * ms); // Assuming 600MHz clock
 }
