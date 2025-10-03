@@ -81,8 +81,12 @@ doc = []  # Enable all features for docs.rs
 [lints.rust]
 warnings = "warn"
 static_mut_refs = "warn"
+unused_imports = "warn"
+unused_variables = "warn"
+dead_code = "warn"
 
 [lints.clippy]
+all = "warn"  # Set all clippy lints to warn instead of deny
 mut_from_ref = "allow"
 missing_docs = "allow"
 missing_safety_doc = "allow"
