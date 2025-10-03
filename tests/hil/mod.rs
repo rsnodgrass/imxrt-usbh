@@ -5,8 +5,8 @@
 
 #![cfg(feature = "std")]
 
+use imxrt_usbh::{Result, UsbHost};
 use std::time::Duration;
-use imxrt_usbh::{UsbHost, Result};
 
 /// HIL test configuration
 pub struct HilConfig {
@@ -84,8 +84,13 @@ pub fn wait_for_device_connection(timeout: Duration) -> Result<bool> {
 }
 
 /// Verify device matches expected specification
-pub fn verify_device_spec(device: &TestDevice, actual_vid: u16, actual_pid: u16, actual_class: u8) -> bool {
-    device.vendor_id == actual_vid &&
-    device.product_id == actual_pid &&
-    device.device_class == actual_class
+pub fn verify_device_spec(
+    device: &TestDevice,
+    actual_vid: u16,
+    actual_pid: u16,
+    actual_class: u8,
+) -> bool {
+    device.vendor_id == actual_vid
+        && device.product_id == actual_pid
+        && device.device_class == actual_class
 }
