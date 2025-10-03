@@ -84,11 +84,11 @@ static_mut_refs = "warn"
 unused_imports = "warn"
 unused_variables = "warn"
 dead_code = "warn"
+missing_docs = "allow"
 
 [lints.clippy]
-all = "warn"  # Set all clippy lints to warn instead of deny
+all = { level = "warn", priority = -1 }  # Set all clippy lints to warn, allow overrides
 mut_from_ref = "allow"
-missing_docs = "allow"
 missing_safety_doc = "allow"
 new_without_default = "allow"
 too_many_arguments = "allow"
