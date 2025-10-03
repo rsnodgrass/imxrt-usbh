@@ -1,90 +1,69 @@
 # imxrt-usbh Examples
 
-This directory contains comprehensive examples demonstrating different aspects of USB host functionality with the `imxrt-usbh` library. Each example is designed to be educational and demonstrate real-world USB host implementation patterns.
+## Getting Started (Start Here!)
 
-NOTE: For simplicity, these education examples do not currently use RTIC, even though underlying `imxrt-usbh` is RTIC based.
+Start with these examples if you're new to this library. They show basic USB host initialization.
 
-## USB Port Configuration (Teensy 4.1 Only)
+### Example 01: USB PHY Initialization
 
-**Important:** These examples are configured for **Teensy 4.1** which has two USB ports:
+The simplest example - just turn on the USB hardware.
 
-- **USB1 (micro USB)** - USB Device port (programming/CDC serial) - **Available for CDC output**
-- **USB2 (host pins)** - USB Host port - **Used for connecting USB devices**
+**What it does**: Initializes the USB PHY (Physical Layer) hardware.
 
-The examples use **USB2** for USB host functionality, leaving **USB1 free** for:
-- Programming the Teensy
-- USB CDC serial output (future feature)
-- Simultaneous computer communication
-
-**Current Logging Setup:**
-
-These examples currently use **UART serial output** on pins 0/1 for simplicity:
-- Connect a USB-to-serial adapter to pins 0 (RX) and 1 (TX)
-- Open serial monitor at 115200 baud
-- See real-time initialization messages
-
-**Future:** Examples will be updated to optionally use USB1 CDC for serial output, eliminating the need for an external serial adapter.
-
-## Getting Started Examples
-
-### `01_basic_host_init.rs` - USB PHY Initialization
-
-Simple introduction to USB host hardware initialization:
-
-- **USB PHY Setup**: Initialize USB PHY for host mode
-- **Serial Output**: Real-time status messages at 115200 baud (pins 0/1)
-- **LED Feedback**: Visual indication of success/failure
-- **Error Handling**: Basic error reporting patterns
-
-**Hardware Requirements:**
-- Teensy 4.0 or 4.1
-- Serial monitor at 115200 baud on pins 0/1
-
+**Build and flash:**
 ```bash
 cargo build --release --example 01_basic_host_init
-cargo objcopy --release --example 01_basic_host_init -- -O ihex 01_basic_host_init.hex
-teensy_loader_cli --mcu=TEENSY41 -w 01_basic_host_init.hex
-# Open serial monitor to see initialization output
+cargo objcopy --release --example 01_basic_host_init -- -O ihex 01.hex
+teensy_loader_cli --mcu=TEENSY41 -w 01.hex
 ```
 
-### `02_device_enumeration.rs` - EHCI Controller Setup
+**Success indicator**: LED blinks slowly (fast blink = error)
 
-Builds on example 01 by adding EHCI controller:
+### Example 02: EHCI Controller Setup
 
-- **EHCI Controller**: Create Enhanced Host Controller Interface instance
-- **Component Overview**: Understand USB host architecture
-- **Serial Output**: Detailed initialization steps
-- **LED Feedback**: Visual indication of success/failure
+Builds on Example 01 by adding the USB host controller.
 
-**Hardware Requirements:**
-- Teensy 4.0 or 4.1
-- Serial monitor at 115200 baud on pins 0/1
+**What it does**: Creates an EHCI controller instance on top of the initialized PHY.
 
+**Build and flash:**
 ```bash
 cargo build --release --example 02_device_enumeration
-cargo objcopy --release --example 02_device_enumeration -- -O ihex 02_device_enumeration.hex
-teensy_loader_cli --mcu=TEENSY41 -w 02_device_enumeration.hex
-# Open serial monitor to see initialization output
+cargo objcopy --release --example 02_device_enumeration -- -O ihex 02.hex
+teensy_loader_cli --mcu=TEENSY41 -w 02.hex
 ```
 
-## Full Working Examples
+**Success indicator**: LED blinks slowly (fast blink = error)
 
-### `enumerate_device.rs` - Advanced USB Device Enumeration
+### Optional: Serial Output
 
-Comprehensive USB device enumeration with advanced features:
+Want to see detailed initialization messages?
 
-- **Multi-device tracking**: Manages multiple connected USB devices simultaneously
-- **Real-time monitoring**: Device connection/disconnection event handling
-- **Device classification**: Automatic device class identification and routing
-- **Performance monitoring**: Device enumeration statistics and health monitoring
-- **Educational register setup**: Detailed comments explaining hardware configuration
+1. **Connect**: USB-to-serial adapter TX→Pin 0, RX→Pin 1, GND→GND
+2. **Open**: Serial monitor at 115200 baud
+3. **Reset**: Press Teensy reset button to see output
 
-**Key Learning Points:**
-- Complete USB 2.0 enumeration sequence
-- Device descriptor parsing and validation
+**Why optional?** The LED tells you success/failure, so serial is only needed for debugging.
+
+---
+
+## Hardware Setup
+
+These examples use:
+- **USB2** (5-pin header, pins 30-32) for USB Host functionality
+- **USB1** (micro USB port) for programming the Teensy
+
+---
+
+## Advanced Examples
+
+These examples demonstrate full device functionality and are more complex:
+
+### `enumerate_device.rs` - Full Device Enumeration
+
+Complete USB device enumeration with multi-device tracking:
+- Real-time device connection/disconnection monitoring
 - Device class identification (HID, Mass Storage, Audio, Hub)
-- Multiple device management patterns
-- Performance monitoring and statistics
+- Performance statistics and health monitoring
 
 ```bash
 cargo build --release --example enumerate_device
@@ -92,24 +71,13 @@ cargo objcopy --release --example enumerate_device -- -O ihex enumerate_device.h
 teensy_loader_cli --mcu=TEENSY41 -w enumerate_device.hex
 ```
 
-### `hid_keyboard.rs` - Complete HID Keyboard Implementation
+### `hid_keyboard.rs` - USB Keyboard Support
 
-Full-featured QWERTY keyboard implementation with comprehensive functionality:
-
-- **Boot Protocol**: HID Boot Protocol for maximum compatibility
-- **Advanced Key Mapping**: Complete USB keycode to ASCII conversion
-- **Modifier Support**: Shift, Ctrl, Alt, and other modifier keys
-- **Key Repeat**: Configurable key repeat rates and delays
-- **N-Key Rollover**: Support for multiple simultaneous key presses
-- **Performance Stats**: Typing statistics and performance monitoring
-
-**Features Demonstrated:**
-- HID boot protocol vs report protocol selection
-- Real-time key press/release event detection
-- Comprehensive modifier key handling (Shift, Ctrl, Alt, GUI)
-- Key repeat timing and rate control
-- ASCII conversion with international layout considerations
-- Multi-device keyboard management
+Full HID keyboard implementation with key mapping and modifiers:
+- Boot protocol for maximum compatibility
+- Complete USB keycode to ASCII conversion
+- Shift, Ctrl, Alt modifier support
+- Key repeat and N-key rollover
 
 ```bash
 cargo build --release --example hid_keyboard
@@ -117,21 +85,13 @@ cargo objcopy --release --example hid_keyboard -- -O ihex hid_keyboard.hex
 teensy_loader_cli --mcu=TEENSY41 -w hid_keyboard.hex
 ```
 
-### `hid_gamepad.rs` - HID Gamepad Support
+### `hid_gamepad.rs` - Game Controller Support
 
-Gamepad and joystick support implementation:
-
-- **Gamepad Detection**: Automatic gamepad device identification
-- **Button Mapping**: Complete button state tracking
-- **Analog Inputs**: Joystick and trigger analog value processing
-- **D-pad Support**: Digital directional pad handling
-- **Multi-controller**: Support for multiple connected gamepads
-
-**Key Features:**
-- HID report descriptor parsing for gamepad devices
-- Analog stick dead-zone handling
-- Button debouncing and state management
-- Real-time input processing
+Gamepad and joystick support:
+- Button mapping and state tracking
+- Analog stick and trigger processing
+- D-pad handling
+- Multi-controller support
 
 ```bash
 cargo build --release --example hid_gamepad
@@ -139,29 +99,13 @@ cargo objcopy --release --example hid_gamepad -- -O ihex hid_gamepad.hex
 teensy_loader_cli --mcu=TEENSY41 -w hid_gamepad.hex
 ```
 
-### `mass_storage.rs` - Complete Mass Storage Implementation
+### `mass_storage.rs` - USB Flash Drive Support
 
-Full USB Mass Storage Class (MSC) implementation using Bulk-Only Transport:
-
-- **SCSI Command Set**: Complete implementation of essential SCSI commands
-- **BOT Protocol**: Full Command Block Wrapper (CBW) and Command Status Wrapper (CSW) handling
-- **Block Operations**: High-performance block-level read/write operations
-- **Error Recovery**: Comprehensive error handling and recovery mechanisms
-- **Multi-LUN Support**: Multiple Logical Unit Number support for complex devices
-
-**SCSI Commands Implemented:**
-- `TEST_UNIT_READY`: Device readiness verification
-- `INQUIRY`: Device identification and capabilities
-- `READ_CAPACITY_10`: Storage capacity and block size detection
-- `READ_10` / `WRITE_10`: High-performance block data operations
-- `REQUEST_SENSE`: Detailed error condition analysis
-- `MODE_SENSE`: Device operating mode information
-
-**Educational Features:**
-- Detailed SCSI protocol explanations
-- USB bulk transfer optimization techniques
-- Error recovery and retry mechanisms
-- Performance monitoring and statistics
+USB Mass Storage Class implementation (SCSI/BOT protocol):
+- SCSI command set (INQUIRY, READ_CAPACITY, READ_10, WRITE_10)
+- Block-level read/write operations
+- Error handling and recovery
+- Multi-LUN support
 
 ```bash
 cargo build --release --example mass_storage
@@ -169,34 +113,21 @@ cargo objcopy --release --example mass_storage -- -O ihex mass_storage.hex
 teensy_loader_cli --mcu=TEENSY41 -w mass_storage.hex
 ```
 
-### `midi_keyboard.rs` - MIDI Device Implementation
+### `midi_keyboard.rs` - MIDI Device Support
 
-Complete USB MIDI device implementation with real-time processing:
-
-- **MIDI Protocol**: Full USB MIDI packet parsing and processing
-- **Real-time Processing**: Interrupt-driven MIDI event handling
-- **Multi-channel**: Support for all 16 MIDI channels
-- **Message Types**: Note On/Off, Control Change, Program Change, Pitch Bend
-- **Performance Monitoring**: MIDI statistics and throughput analysis
-
-**MIDI Features:**
-- USB MIDI packet format parsing
-- MIDI message classification and routing
-- Real-time MIDI event processing
-- Channel and velocity handling
-- MIDI device identification and capabilities
-
-**Educational Content:**
-- MIDI protocol explanation with examples
-- USB Audio Class device enumeration
-- Real-time audio processing patterns
-- Low-latency interrupt transfer usage
+USB MIDI device implementation:
+- USB MIDI packet parsing
+- 16-channel support
+- Note On/Off, Control Change, Program Change, Pitch Bend
+- Real-time event processing
 
 ```bash
 cargo build --release --example midi_keyboard
 cargo objcopy --release --example midi_keyboard -- -O ihex midi_keyboard.hex
 teensy_loader_cli --mcu=TEENSY41 -w midi_keyboard.hex
 ```
+
+---
 
 ## Educational Design
 
