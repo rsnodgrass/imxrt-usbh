@@ -25,7 +25,8 @@ use imxrt_usbh::{
     phy::UsbPhy,
     enumeration::{DeviceEnumerator, EnumeratedDevice, DeviceClass},
     transfer::simple_control::{SetupPacket, ControlExecutor},
-    dma::memory::UsbMemoryPool,
+    transfer::{InterruptTransferManager, InterruptState, Direction},
+    dma::UsbMemoryPool,
 };
 
 use core::sync::atomic::{AtomicU32, AtomicBool, Ordering};
@@ -421,87 +422,7 @@ impl UsbKeyboard {
         self.is_initialized = true;
         Ok(())
     }
-    
-    /// Simulate keyboard report reading (in real implementation, use interrupt transfers)
-    /// 
-    /// This demonstrates how keyboard reports would arrive from a real USB keyboard.
-    /// Each report represents the current state of all keys at a specific moment.
-    fn simulate_keyboard_data(&self) -> Option<KeyboardReport> {
-        // For educational purposes, simulate typing "Hello World!" sequence
-        static mut SIMULATION_COUNTER: u32 = 0;
-        
-        unsafe {
-            SIMULATION_COUNTER += 1;
-            let sequence_position = SIMULATION_COUNTER % 1000;
-            
-            // Generate different reports based on timing to simulate typing
-            self.get_simulated_keypress(sequence_position)
-        }
-    }
-    
-    /// Generate simulated keypress for educational demonstration
-    /// 
-    /// This breaks down the simulation into a cleaner helper function that
-    /// demonstrates how USB HID keycodes work in practice.
-    fn get_simulated_keypress(&self, position: u32) -> Option<KeyboardReport> {
-        use self::hid_keycodes::*;  // Use our well-documented keycode constants
-        
-        // Simulate typing "Hello World!" character by character
-        // Each case shows how modifiers and keycodes combine for different characters
-        match position {
-            // Capital 'H' - requires Shift modifier (0x02) + H keycode (0x0B)
-            100 => Some(self.create_report_with_shift(KEY_H)),
-            
-            // Lowercase letters - just the keycode, no modifier needed
-            200 => Some(self.create_simple_report(KEY_E)),  // 'e'
-            300 => Some(self.create_simple_report(KEY_L)),  // 'l' 
-            400 => Some(self.create_simple_report(KEY_L)),  // 'l'
-            500 => Some(self.create_simple_report(KEY_O)),  // 'o'
-            
-            // Space character - uses specific space keycode
-            600 => Some(self.create_simple_report(KEY_SPACE)),
-            
-            // Capital 'W' - another shift + letter combination  
-            650 => Some(self.create_report_with_shift(KEY_W)),
-            
-            // Continue with rest of "orld!"
-            700 => Some(self.create_simple_report(KEY_O)),  // 'o'
-            750 => Some(self.create_simple_report(KEY_R)),  // 'r'
-            800 => Some(self.create_simple_report(KEY_L)),  // 'l'
-            850 => Some(self.create_simple_report(KEY_D)),  // 'd'
-            
-            // Exclamation mark - Shift + 1 key (which has ! symbol when shifted)
-            900 => Some(self.create_report_with_shift(KEY_1)),
-            
-            // Default: no keys pressed (all keys released)
-            _ => Some(KeyboardReport::new()),
-        }
-    }
-    
-    /// Create a keyboard report for a simple key press (no modifiers)
-    /// 
-    /// This helper function makes the code more readable and educational
-    /// by clearly showing how to construct a basic key press report.
-    fn create_simple_report(&self, keycode: u8) -> KeyboardReport {
-        KeyboardReport {
-            modifiers: 0,           // No modifier keys pressed
-            reserved: 0,            // Always 0 in HID boot protocol
-            keycodes: [keycode, 0, 0, 0, 0, 0], // Primary key + 5 empty slots
-        }
-    }
-    
-    /// Create a keyboard report for a key press with Shift modifier
-    /// 
-    /// This shows how capital letters and shifted symbols are created by
-    /// combining the base keycode with the appropriate modifier.
-    fn create_report_with_shift(&self, keycode: u8) -> KeyboardReport {
-        KeyboardReport {
-            modifiers: 0x02,        // Left Shift modifier (bit 1 set)
-            reserved: 0,            // Always 0 in HID boot protocol  
-            keycodes: [keycode, 0, 0, 0, 0, 0], // Primary key + 5 empty slots
-        }
-    }
-    
+
     /// Update keyboard state and return events
     fn update(&mut self, report: KeyboardReport) -> heapless::Vec<KeyboardEvent, 12> {
         self.state.update(report)
@@ -523,6 +444,8 @@ struct SimpleApp {
     keyboard: Option<UsbKeyboard>,
     stats: TypingStats,
     led_counter: u32,
+    interrupt_mgr: InterruptTransferManager<8>,
+    keyboard_transfer_id: Option<usize>,
 }
 
 impl SimpleApp {
@@ -553,6 +476,8 @@ impl SimpleApp {
             keyboard: None,
             stats: TypingStats::new(),
             led_counter: 0,
+            interrupt_mgr: InterruptTransferManager::new(),
+            keyboard_transfer_id: None,
         })
     }
     
@@ -560,12 +485,32 @@ impl SimpleApp {
         if self.keyboard.is_some() {
             return; // Already have a keyboard
         }
-        
+
         // Try to enumerate a keyboard
         if let Ok(device_info) = self.enumerate_hid_device() {
             let mut keyboard = UsbKeyboard::new(device_info);
             if keyboard.initialize(&mut self.memory_pool).is_ok() {
-                self.keyboard = Some(keyboard);
+                // Submit interrupt transfer to read keyboard reports
+                if let Some(buffer) = self.memory_pool.alloc_buffer(8) {
+                    match self.interrupt_mgr.submit(
+                        Direction::In,
+                        keyboard.device_info.address,
+                        keyboard.interrupt_endpoint,
+                        keyboard.max_packet_size,
+                        buffer,
+                        keyboard.poll_interval,
+                        true, // Periodic transfer
+                    ) {
+                        Ok(transfer_id) => {
+                            info!("✓ Keyboard detected! Starting interrupt transfers...");
+                            self.keyboard_transfer_id = Some(transfer_id);
+                            self.keyboard = Some(keyboard);
+                        }
+                        Err(e) => {
+                            info!("Failed to submit interrupt transfer: {:?}", e);
+                        }
+                    }
+                }
             }
         }
     }
@@ -582,14 +527,114 @@ impl SimpleApp {
     }
     
     fn process_keyboard(&mut self) {
-        if let Some(ref mut keyboard) = self.keyboard {
-            if let Some(report) = keyboard.simulate_keyboard_data() {
-                let events = keyboard.update(report);
-                let repeat_events = keyboard.process_repeats();
-                
-                // Handle all events
-                self.handle_keyboard_events(events);
-                self.handle_keyboard_events(repeat_events);
+        // Get keyboard transfer ID if present
+        let transfer_id = match self.keyboard_transfer_id {
+            Some(id) => id,
+            None => return,
+        };
+
+        // Check transfer state
+        let state = match self.interrupt_mgr.get_transfer(transfer_id) {
+            Some(transfer) => transfer.state(),
+            None => return,
+        };
+
+        match state {
+            InterruptState::Complete => {
+                // Get keyboard params before taking buffer
+                let (device_addr, endpoint, max_packet_size, poll_interval) =
+                    if let Some(ref kb) = self.keyboard {
+                        (kb.device_info.address, kb.interrupt_endpoint, kb.max_packet_size, kb.poll_interval)
+                    } else {
+                        return;
+                    };
+
+                // Take buffer from transfer
+                if let Some(transfer) = self.interrupt_mgr.get_transfer_mut(transfer_id) {
+                    if let Some(buffer) = transfer.take_buffer() {
+                        // Parse the 8-byte keyboard report
+                        let data = buffer.as_slice();
+                        if data.len() >= 8 {
+                            let report = KeyboardReport {
+                                modifiers: data[0],
+                                reserved: data[1],
+                                keycodes: [
+                                    data[2], data[3], data[4],
+                                    data[5], data[6], data[7]
+                                ],
+                            };
+
+                            // Process the report and generate events
+                            if let Some(ref mut keyboard) = self.keyboard {
+                                let events = keyboard.update(report);
+                                let repeat_events = keyboard.process_repeats();
+
+                                self.handle_keyboard_events(events);
+                                self.handle_keyboard_events(repeat_events);
+                            }
+                        }
+
+                        // Return buffer to pool
+                        let _ = self.memory_pool.free_buffer(&buffer);
+
+                        // Resubmit transfer for next report
+                        if let Some(new_buffer) = self.memory_pool.alloc_buffer(8) {
+                            match self.interrupt_mgr.submit(
+                                Direction::In,
+                                device_addr,
+                                endpoint,
+                                max_packet_size,
+                                new_buffer,
+                                poll_interval,
+                                true,
+                            ) {
+                                Ok(new_id) => {
+                                    self.keyboard_transfer_id = Some(new_id);
+                                }
+                                Err(e) => {
+                                    info!("Failed to resubmit interrupt transfer: {:?}", e);
+                                    self.keyboard_transfer_id = None;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ if self.interrupt_mgr.get_transfer(transfer_id).map(|t| t.is_failed() || t.is_stalled()).unwrap_or(false) => {
+                // Transfer failed - log and try to recover
+                info!("Interrupt transfer failed/stalled");
+
+                // Get keyboard params for resubmit
+                let (device_addr, endpoint, max_packet_size, poll_interval) =
+                    if let Some(ref kb) = self.keyboard {
+                        (kb.device_info.address, kb.interrupt_endpoint, kb.max_packet_size, kb.poll_interval)
+                    } else {
+                        return;
+                    };
+
+                // Resubmit the transfer
+                if let Some(new_buffer) = self.memory_pool.alloc_buffer(8) {
+                    match self.interrupt_mgr.submit(
+                        Direction::In,
+                        device_addr,
+                        endpoint,
+                        max_packet_size,
+                        new_buffer,
+                        poll_interval,
+                        true,
+                    ) {
+                        Ok(new_id) => {
+                            self.keyboard_transfer_id = Some(new_id);
+                        }
+                        Err(_) => {
+                            self.keyboard_transfer_id = None;
+                            self.keyboard = None;
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Still pending or other state - nothing to do
             }
         }
     }
@@ -700,8 +745,13 @@ fn main() -> ! {
     loop {
         poller.poll();
         SYSTEM_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+        // Check for new keyboard every iteration (could be optimized)
         app.detect_keyboard();
+
+        // Process real USB keyboard interrupt transfers
         app.process_keyboard();
+
         app.update_status();
         delay_ms(1);
     }

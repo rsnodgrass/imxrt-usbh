@@ -91,9 +91,16 @@ cargo readobj --release --example enumerate_device -- --section-headers
   - `register.rs` - Memory-mapped register abstractions
 
 - **`dma/`** - Cache-coherent DMA buffer management
-  - `memory.rs` - Static memory pool allocator (32 QH, 32 QTD, 32 buffers)
-  - `buffer.rs` - DMA buffer with ARM Cortex-M7 cache operations
-  - `descriptor.rs` - EHCI data structure allocators
+  - **ALWAYS USE**: `dma::DmaBuffer` (defined in `dma.rs`) - Production DMA buffer type
+    - Uses `NonNull<u8>` for safety
+    - NOT Copy/Clone to prevent aliasing
+    - Methods: `as_slice()`, `as_mut_slice()`, `dma_addr()`, `prepare_for_device()`, `prepare_for_cpu()`
+  - **ALWAYS USE**: `UsbMemoryPool` (in `memory.rs`) - Allocator for DmaBuffer
+    - Simple bit-mask allocator (32 buffers max, 512 bytes each)
+    - `alloc_buffer(size)` returns `DmaBuffer`
+    - `free_buffer(&buffer)` returns buffer to pool
+  - `descriptor.rs` - EHCI QH/QTD allocators (QhHandle, QtdHandle)
+  - `pools.rs` - Alternative pool systems (NOT currently used for buffers)
   - All DMA structures are 32-byte aligned per EHCI spec
 
 - **`transfer/`** - High-level transfer APIs
@@ -211,6 +218,38 @@ Examples use USB2 for host functionality, leaving USB1 for CDC serial output.
 - Examples serve dual purpose: educational + integration tests
 
 ## Common Patterns
+
+### DMA Buffer Usage (CRITICAL)
+
+**ALWAYS use `dma::DmaBuffer` + `UsbMemoryPool` for all buffer allocations:**
+
+```rust
+use imxrt_usbh::dma::UsbMemoryPool;
+
+// Initialize pool
+let mut memory_pool = unsafe { &mut imxrt_usbh::dma::memory::USB_MEMORY_POOL };
+
+// Allocate buffer
+let buffer = memory_pool.alloc_buffer(512)
+    .ok_or(UsbError::NoResources)?;
+
+// Use buffer (automatically has proper type)
+transfer_manager.submit(Direction::In, addr, ep, max_pkt, buffer, interval, true)?;
+
+// Buffer is returned via free_buffer() or consumed by transfer manager
+let _ = memory_pool.free_buffer(&buffer);
+```
+
+**DO NOT**:
+- Create custom DmaBuffer types
+- Use raw pointers for DMA buffers
+- Copy or clone DmaBuffer (it's not Copy/Clone)
+- Allocate buffers outside of UsbMemoryPool
+
+**Buffer Lifecycle**:
+1. Allocate: `memory_pool.alloc_buffer(size)` → Returns `Option<DmaBuffer>`
+2. Use: Pass to transfer managers or access via `as_slice()` / `as_mut_slice()`
+3. Free: Either consumed by transfer or manually freed with `free_buffer(&buffer)`
 
 ### Device Enumeration Flow
 

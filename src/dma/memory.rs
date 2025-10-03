@@ -1,8 +1,9 @@
 //! Simplified USB memory management
-//! 
+//!
 //! Simple bit-mask based allocation for USB descriptors and buffers
 
 use crate::error::{Result, UsbError};
+use core::ptr::NonNull;
 
 /// Simple USB memory pool with static allocation
 pub struct UsbMemoryPool {
@@ -62,30 +63,37 @@ impl UsbMemoryPool {
     }
     
     /// Allocate DMA buffer slot
-    pub fn alloc_buffer(&mut self, _size: usize) -> Option<DmaBuffer> {
+    pub fn alloc_buffer(&mut self, size: usize) -> Option<super::DmaBuffer> {
+        // Fixed 512-byte buffers, reject requests that are too large
+        if size > 512 {
+            return None;
+        }
+
         let free_bit = (!self.buffer_allocated).trailing_zeros();
         if free_bit < 32 {
             self.buffer_allocated |= 1 << free_bit;
-            Some(DmaBuffer {
-                ptr: unsafe { BUFFER_POOL[free_bit as usize].as_mut_ptr() },
-                len: 512, // Fixed size
-                actual_size: 512,
-            })
+            let index = free_bit as usize;
+
+            // Safety: BUFFER_POOL is static memory, always valid
+            // Index is guaranteed < 32 by the trailing_zeros check above
+            let ptr = unsafe {
+                NonNull::new_unchecked(BUFFER_POOL[index].as_mut_ptr())
+            };
+
+            Some(super::DmaBuffer::new(ptr, size.max(1), index))
         } else {
             None
         }
     }
-    
+
     /// Free DMA buffer
-    pub fn free_buffer(&mut self, buffer: DmaBuffer) -> Result<()> {
-        let buffer_addr = buffer.ptr as usize;
-        let pool_start = core::ptr::addr_of!(BUFFER_POOL) as usize;
-        let index = (buffer_addr - pool_start) / 512;
-        
+    pub fn free_buffer(&mut self, buffer: &super::DmaBuffer) -> Result<()> {
+        let index = buffer.pool_index();
+
         if index >= 32 {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         self.buffer_allocated &= !(1 << index);
         Ok(())
     }
@@ -102,47 +110,6 @@ impl UsbMemoryPool {
 
 /// Static buffer pool - 32 buffers of 512 bytes each
 static mut BUFFER_POOL: [[u8; 512]; 32] = [[0; 512]; 32];
-
-/// DMA buffer handle
-///
-/// NOT Copy/Clone - must be explicitly freed to prevent aliasing.
-/// Represents unique ownership of a DMA buffer slot.
-#[derive(Debug)]
-pub struct DmaBuffer {
-    /// Pointer to buffer data
-    pub ptr: *mut u8,
-    /// Requested length
-    pub len: usize,
-    /// Actual allocated size
-    pub actual_size: usize,
-}
-
-impl DmaBuffer {
-    /// Get buffer as slice
-    pub fn as_slice(&self) -> &[u8] {
-        unsafe { core::slice::from_raw_parts(self.ptr, self.len) }
-    }
-    
-    /// Get buffer as mutable slice
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        unsafe { core::slice::from_raw_parts_mut(self.ptr, self.len) }
-    }
-    
-    /// Get physical address for DMA
-    pub fn physical_address(&self) -> u32 {
-        self.ptr as u32
-    }
-    
-    /// Prepare buffer for DMA write (CPU -> Device)
-    pub fn prepare_for_device(&self) {
-        crate::dma::cache_ops::prepare_for_dma_write(self.as_slice());
-    }
-    
-    /// Prepare buffer for CPU read (Device -> CPU)
-    pub fn prepare_for_cpu(&mut self) {
-        crate::dma::cache_ops::prepare_for_dma_read(self.as_mut_slice());
-    }
-}
 
 /// Global memory pool instance
 pub static mut USB_MEMORY_POOL: UsbMemoryPool = UsbMemoryPool::new();

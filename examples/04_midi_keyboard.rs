@@ -42,7 +42,8 @@ use imxrt_usbh::{
     ehci::controller::{EhciController, Uninitialized, Running},
     phy::UsbPhy,
     enumeration::{DeviceEnumerator, EnumeratedDevice, DeviceClass},
-    dma::memory::UsbMemoryPool,
+    dma::UsbMemoryPool,
+    transfer::{BulkTransferManager, Direction},
 };
 
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -611,6 +612,7 @@ struct MidiDevice {
     interface: u8,
     bulk_in_endpoint: u8,
     bulk_out_endpoint: u8,
+    max_packet_size: u16,
     is_initialized: bool,
 }
 
@@ -621,6 +623,7 @@ impl MidiDevice {
             interface: 0,  // Typically interface 1 for MIDI streaming
             bulk_in_endpoint: 0x81, // Endpoint 1 IN
             bulk_out_endpoint: 0x01, // Endpoint 1 OUT
+            max_packet_size: 64,    // Typical for MIDI USB devices
             is_initialized: false,
         }
     }
@@ -630,39 +633,11 @@ impl MidiDevice {
         // In a full implementation, we would:
         // 1. Parse configuration descriptor to find MIDI streaming interface
         // 2. Find bulk endpoints for MIDI data
-        // 3. Set up interrupt transfers for the bulk IN endpoint
-        // 4. Send any necessary class-specific setup commands
-        
-        // For this example, we'll simulate successful initialization
+        // 3. Send any necessary class-specific setup commands
+
+        // For this example, we'll use default endpoint configuration
         self.is_initialized = true;
         Ok(())
-    }
-    
-    /// Simulate reading MIDI data (in real implementation, this would be interrupt-driven)
-    ///
-    /// TODO: Replace this with real USB interrupt transfers
-    /// In a full implementation, you would:
-    /// 1. Set up interrupt endpoint for bulk IN transfers
-    /// 2. Use interrupt transfers to read MIDI packets from the device
-    /// 3. Process packets in an interrupt handler or polling loop
-    /// 4. Handle USB errors and device disconnection
-    ///
-    /// For now, this simulates MIDI events for demonstration purposes.
-    fn simulate_midi_data(&self) -> Option<[u8; 4]> {
-        // Simulate various MIDI events for demonstration
-        static mut COUNTER: u32 = 0;
-        unsafe {
-            COUNTER += 1;
-            match COUNTER % 300 {
-                0 => Some([0x09, 0x90, 60, 127]),   // Note On C4, velocity 127
-                50 => Some([0x08, 0x80, 60, 127]),  // Note Off C4
-                100 => Some([0x09, 0x90, 64, 100]), // Note On E4, velocity 100
-                150 => Some([0x08, 0x80, 64, 100]), // Note Off E4
-                200 => Some([0x0B, 0xB0, 7, 100]),  // Volume CC (controller 7), value 100
-                250 => Some([0x0E, 0xE0, 0x00, 0x40]), // Pitch bend center
-                _ => None,
-            }
-        }
     }
 }
 
@@ -674,6 +649,8 @@ struct MidiApp {
     stats: MidiStats,
     tick_counter: u32,
     led_blink_counter: u32,
+    bulk_mgr: BulkTransferManager<8>,
+    midi_transfer_id: Option<usize>,
 }
 
 impl MidiApp {
@@ -712,6 +689,8 @@ impl MidiApp {
             stats: MidiStats::new(),
             tick_counter: 0,
             led_blink_counter: 0,
+            bulk_mgr: BulkTransferManager::new(),
+            midi_transfer_id: None,
         })
     }
     
@@ -727,7 +706,32 @@ impl MidiApp {
                 if device.initialize(&mut self.memory_pool).is_ok() {
                     info!("MIDI keyboard detected and initialized!");
                     info!("Start playing to see MIDI events\r\n");
-                    self.midi_device = Some(device);
+
+                    // Allocate buffer for bulk IN transfer (MIDI packets are 4 bytes, but use 64-byte buffer)
+                    if let Some(buffer) = self.memory_pool.alloc_buffer(64) {
+                        match self.bulk_mgr.submit(
+                            Direction::In,
+                            device.device_info.address,
+                            device.bulk_in_endpoint,
+                            device.max_packet_size,
+                            buffer,
+                            1000, // timeout in ms
+                        ) {
+                            Ok(transfer_id) => {
+                                self.midi_transfer_id = Some(transfer_id);
+                                self.midi_device = Some(device);
+                            }
+                            Err(e) => {
+                                info!("Failed to submit MIDI bulk transfer: {:?}", e);
+                                // free buffer on error
+                                if let Some(buffer) = self.memory_pool.alloc_buffer(64) {
+                                    let _ = self.memory_pool.free_buffer(&buffer);
+                                }
+                            }
+                        }
+                    } else {
+                        info!("No DMA buffers available for MIDI transfer");
+                    }
                 }
             }
             Err(_) => {
@@ -738,21 +742,105 @@ impl MidiApp {
     
     /// Process MIDI data from connected device
     fn process_midi_data(&mut self) {
-        if let Some(ref mut device) = self.midi_device {
-            if !device.is_initialized {
-                return;
-            }
-            
-            // Simulate reading MIDI data (in real implementation, use interrupt transfers)
-            if let Some(packet) = device.simulate_midi_data() {
-                self.stats.packet_received();
-                
-                // Parse MIDI event
-                if let Some(event) = MidiEvent::from_usb_midi_packet(&packet) {
-                    self.handle_midi_event(event);
-                } else {
-                    self.stats.parse_error();
+        // Extract device parameters before taking mutable references
+        let (device_addr, endpoint, max_packet_size) =
+            if let Some(ref device) = self.midi_device {
+                if !device.is_initialized {
+                    return;
                 }
+                (device.device_info.address, device.bulk_in_endpoint, device.max_packet_size)
+            } else {
+                return;
+            };
+
+        // Poll bulk transfer for MIDI data
+        if let Some(transfer_id) = self.midi_transfer_id {
+            if let Some(transfer) = self.bulk_mgr.get_transfer_mut(transfer_id) {
+                if transfer.is_complete() {
+                    // Transfer complete - process MIDI data
+                    if let Some(mut buffer) = transfer.take_buffer() {
+                        // Prepare buffer for CPU access (cache coherency)
+                        buffer.prepare_for_cpu();
+
+                        let data = buffer.as_slice();
+                        let bytes_received = transfer.bytes_transferred() as usize;
+
+                        // Process each 4-byte MIDI packet in the buffer
+                        let packet_count = bytes_received / 4;
+                        for i in 0..packet_count {
+                            let offset = i * 4;
+                            if offset + 4 <= data.len() {
+                                let packet: [u8; 4] = [
+                                    data[offset],
+                                    data[offset + 1],
+                                    data[offset + 2],
+                                    data[offset + 3],
+                                ];
+
+                                // Only process non-zero packets (skip padding)
+                                if packet[0] != 0 {
+                                    self.stats.packet_received();
+
+                                    if let Some(event) = MidiEvent::from_usb_midi_packet(&packet) {
+                                        self.handle_midi_event(event);
+                                    } else {
+                                        self.stats.parse_error();
+                                    }
+                                }
+                            }
+                        }
+
+                        // Return buffer to pool
+                        let _ = self.memory_pool.free_buffer(&buffer);
+
+                        // Resubmit transfer for continuous reading
+                        if let Some(new_buffer) = self.memory_pool.alloc_buffer(64) {
+                            match self.bulk_mgr.submit(
+                                Direction::In,
+                                device_addr,
+                                endpoint,
+                                max_packet_size,
+                                new_buffer,
+                                1000,
+                            ) {
+                                Ok(new_transfer_id) => {
+                                    self.midi_transfer_id = Some(new_transfer_id);
+                                }
+                                Err(e) => {
+                                    info!("Failed to resubmit MIDI transfer: {:?}", e);
+                                    self.midi_transfer_id = None;
+                                    // note: buffer was already moved into submit(), can't free it here
+                                }
+                            }
+                        }
+                    }
+                } else if transfer.is_failed() {
+                    // Handle error - free buffer and resubmit
+                    if let Some(buffer) = transfer.take_buffer() {
+                        let _ = self.memory_pool.free_buffer(&buffer);
+                    }
+
+                    // Resubmit transfer after error
+                    if let Some(new_buffer) = self.memory_pool.alloc_buffer(64) {
+                        match self.bulk_mgr.submit(
+                            Direction::In,
+                            device_addr,
+                            endpoint,
+                            max_packet_size,
+                            new_buffer,
+                            1000,
+                        ) {
+                            Ok(new_transfer_id) => {
+                                self.midi_transfer_id = Some(new_transfer_id);
+                            }
+                            Err(_e) => {
+                                self.midi_transfer_id = None;
+                                // note: buffer was already moved into submit(), can't free it here
+                            }
+                        }
+                    }
+                }
+                // If state is Pending, just wait for completion
             }
         }
     }
@@ -844,12 +932,15 @@ fn main() -> ! {
     loop {
         poller.poll();
 
+        // Check for MIDI device every 500 iterations (~500ms)
         if app.tick_counter % 500 == 0 {
             app.detect_midi_device();
         }
 
+        // Process MIDI data from real USB bulk transfers
         app.process_midi_data();
 
+        // Update LED based on note events
         if app.led_blink_counter > 0 {
             let _ = led.set_high();
         } else {

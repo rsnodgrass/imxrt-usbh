@@ -2,13 +2,11 @@
 
 pub mod pools;
 pub mod descriptor;
-pub mod buffer;
 pub mod memory;
 
 pub use pools::{UsbDescriptorPool, DataBufferPool, BufferHandle, PoolStats};
 pub use descriptor::{DescriptorAllocator, QhHandle, QtdHandle, DescriptorState};
-pub use buffer::{BufferPool, BufferHandle as DmaBufferHandle, BufferSize};
-pub use memory::{UsbMemoryPool, DmaBuffer as MemoryDmaBuffer};
+pub use memory::UsbMemoryPool;
 
 use core::mem::size_of;
 use core::ptr::NonNull;
@@ -201,24 +199,76 @@ impl PartialEq for DmaBuffer {
 }
 
 impl DmaBuffer {
+    /// Create a new DMA buffer
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure:
+    /// - `ptr` points to valid DMA-accessible memory
+    /// - Memory remains valid for the lifetime of this buffer
+    /// - `pool_index` is valid for the associated pool
+    pub(crate) fn new(ptr: NonNull<u8>, size: usize, pool_index: usize) -> Self {
+        Self {
+            ptr,
+            size,
+            pool_index,
+        }
+    }
+
+    /// Get pool index (for returning to pool)
+    pub(crate) fn pool_index(&self) -> usize {
+        self.pool_index
+    }
+
+    /// Get raw const pointer
     pub fn as_ptr(&self) -> *const u8 {
         self.ptr.as_ptr()
     }
-    
+
+    /// Get raw mutable pointer
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
         self.ptr.as_ptr()
     }
-    
+
+    /// Get physical DMA address
     pub fn dma_addr(&self) -> u32 {
         self.ptr.as_ptr() as u32
     }
-    
+
+    /// Get buffer as immutable slice
     pub fn as_slice(&self) -> &[u8] {
+        // Safety: ptr is NonNull and size is valid per construction contract
         unsafe { core::slice::from_raw_parts(self.ptr.as_ptr(), self.size) }
     }
-    
+
+    /// Get buffer as mutable slice
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        // Safety: ptr is NonNull and size is valid per construction contract
         unsafe { core::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.size) }
+    }
+
+    /// Get buffer size in bytes
+    pub fn len(&self) -> usize {
+        self.size
+    }
+
+    /// Check if buffer is empty
+    pub fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+
+    /// Prepare buffer for DMA write (CPU -> Device)
+    ///
+    /// Cleans the D-cache to ensure CPU writes are visible to DMA hardware
+    pub fn prepare_for_device(&self) {
+        cache_ops::prepare_for_dma_write(self.as_slice());
+    }
+
+    /// Prepare buffer for CPU read (Device -> CPU)
+    ///
+    /// Invalidates the D-cache so CPU reads fresh data from memory written by DMA
+    pub fn prepare_for_cpu(&mut self) {
+        cache_ops::prepare_for_dma_read(self.as_mut_slice());
     }
 }
 

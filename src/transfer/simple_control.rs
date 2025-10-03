@@ -3,7 +3,7 @@
 //! Streamlined control transfer without excessive state management
 
 use crate::error::{Result, UsbError};
-use crate::dma::{UsbMemoryPool, MemoryDmaBuffer};
+use crate::dma::{UsbMemoryPool, DmaBuffer};
 
 /// USB Setup packet (USB 2.0 spec)
 #[repr(C, packed)]
@@ -56,7 +56,7 @@ impl SetupPacket {
 /// Simplified control transfer
 pub struct SimpleControlTransfer {
     setup: SetupPacket,
-    data_buffer: Option<MemoryDmaBuffer>,
+    data_buffer: Option<DmaBuffer>,
     device_address: u8,
     endpoint: u8,
     max_packet_size: u16,
