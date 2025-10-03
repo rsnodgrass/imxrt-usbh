@@ -104,37 +104,51 @@ Comprehensive unit tests have been implemented for the `imxrt-usbh` USB host lib
 
 ## Running Tests
 
-### ARM Target Only
+### Current Limitations
 
-All tests compile for the ARM Cortex-M7 target (`thumbv7em-none-eabihf`) as this library directly accesses i.MX RT1062 hardware registers.
+**Important**: This is a `#![no_std]` embedded library that directly accesses ARM Cortex-M7 hardware registers. The Rust `#[test]` framework requires the `test` crate which is **not available for embedded targets**.
 
-### Running Unit Tests
+**Test Status:**
+- ✅ **Code compiles**: `cargo check --target thumbv7em-none-eabihf` succeeds
+- ✅ **Tests serve as documentation**: Show intended API usage patterns
+- ❌ **Tests cannot execute**: Require `test` crate (host-only) or test runner firmware
+- ❌ **Integration tests need refactoring**: Currently access private APIs
 
-```bash
-# Build and verify inline unit tests compile for ARM
-cargo test --lib --no-run --target thumbv7em-none-eabihf
-
-# Run integration tests that don't require hardware (compiles only)
-cargo test --test integration --no-run --target thumbv7em-none-eabihf
-cargo test --test error_handling --no-run --target thumbv7em-none-eabihf
-cargo test --test resource_management --no-run --target thumbv7em-none-eabihf
-```
-
-### Running Hardware-in-the-Loop Tests
-
-Hardware tests require actual Teensy 4.1 hardware and are marked with `#[ignore]`:
+### Verifying Test Code
 
 ```bash
-# Run HIL tests on device (requires test runner on Teensy 4.1)
-cargo test --test hil --features std --target thumbv7em-none-eabihf -- --ignored
+# Verify library compiles without errors
+cargo check --target thumbv7em-none-eabihf
+
+# Check test code syntax (will fail on test harness, but validates Rust code)
+cargo check --tests --target thumbv7em-none-eabihf
+
+# Build examples to verify core functionality
+cargo build --release --target thumbv7em-none-eabihf --examples
 ```
+
+### Future Test Execution Options
+
+1. **Custom test runner**: Flash test firmware to Teensy 4.1, output results via serial
+2. **QEMU emulation**: Emulate ARM Cortex-M7 (limited hardware support)
+3. **Defmt test framework**: Use defmt-test for embedded test execution
+4. **Mock HAL**: Create hardware abstraction for host testing (significant work)
 
 ### Test Organization
 
-- **Inline unit tests**: In `src/` files under `#[cfg(test)] mod tests`
-- **Integration tests**: In `tests/integration.rs`, `tests/error_handling.rs`, `tests/resource_management.rs`
-- **Hardware tests**: In `tests/hil.rs` with `#[ignore = "requires hardware"]`
+- **Inline unit tests** (68 tests): In `src/` files - serve as **documentation** of intended behavior
+- **Integration tests** (31 tests): In `tests/` - demonstrate **multi-module interactions**
+- **Hardware tests**: In `tests/hil.rs` - require actual **Teensy 4.1 hardware**
 - **Test utilities**: In `tests/common/` for shared mock helpers
+
+### Practical Testing Approach
+
+Since automated tests can't execute on embedded targets, this project uses:
+
+1. **Examples as integration tests**: `examples/` directory contains runnable code
+2. **Hardware verification**: Flash examples to Teensy 4.1 and verify behavior
+3. **Code review**: Tests document expected behavior for manual verification
+4. **Compile-time verification**: Type system enforces safety (e.g., `DmaBuffer` is `!Copy`)
 
 ## Test Coverage
 
