@@ -174,12 +174,59 @@ fn main() -> ! {
                         poller.poll();
                         keyboard_detected = true;
 
-                        // Note: Full interrupt transfer implementation would go here
-                        info!("\r\nKeyboard ready!");
-                        info!("(Full interrupt transfer demo requires additional implementation)");
-                        poller.poll();
+                        // Set up interrupt transfer manager for reading keypresses
+                        let mut interrupt_mgr = InterruptTransferManager::<4>::new();
 
-                        led.clear();
+                        // Allocate buffer for keyboard report (8 bytes for boot protocol)
+                        if let Some(buffer) = memory_pool.alloc_buffer(8) {
+                            match interrupt_mgr.submit(
+                                Direction::In,
+                                device.address,
+                                0x81, // Keyboard IN endpoint
+                                8,    // Max packet size
+                                buffer,
+                                10,   // Poll interval (10ms)
+                                true, // Periodic transfer
+                            ) {
+                                Ok(transfer_id) => {
+                                    info!("✓ Interrupt transfer configured");
+                                    info!("\r\nKeyboard ready for input!");
+                                    info!(
+                                        "Note: Full keypress display requires transfer buffer API"
+                                    );
+                                    poller.poll();
+                                    led.clear();
+
+                                    // Monitor keyboard activity
+                                    let mut last_bytes = 0u32;
+                                    loop {
+                                        poller.poll();
+
+                                        if let Some(transfer) =
+                                            interrupt_mgr.get_transfer(transfer_id)
+                                        {
+                                            let current_bytes = transfer.bytes_transferred();
+
+                                            if transfer.is_complete() && current_bytes != last_bytes
+                                            {
+                                                info!("Keyboard activity: {} bytes", current_bytes);
+                                                last_bytes = current_bytes;
+                                                led.toggle();
+                                            }
+                                        }
+
+                                        cortex_m::asm::delay(10000);
+                                    }
+                                }
+                                Err(_) => {
+                                    info!("✗ Failed to start interrupt transfer");
+                                    poller.poll();
+                                }
+                            }
+                        } else {
+                            info!("✗ No buffer available");
+                            poller.poll();
+                        }
                     }
                 }
             }

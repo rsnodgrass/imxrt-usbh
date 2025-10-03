@@ -21,7 +21,10 @@ use imxrt_ral as ral;
 
 use imxrt_usbh::{
     dma::memory::UsbMemoryPool,
-    ehci::controller::{EhciController, Running, Uninitialized},
+    ehci::{
+        controller::{EhciController, Running, Uninitialized},
+        TransferExecutor,
+    },
     enumeration::{DeviceClass, DeviceEnumerator, EnumeratedDevice},
     phy::UsbPhy,
     transfer::simple_control::{ControlExecutor, SetupPacket},
@@ -191,9 +194,13 @@ impl HidGamepad {
     }
 
     /// Initialize gamepad
-    pub fn initialize(&mut self, memory_pool: &mut UsbMemoryPool) -> Result<()> {
+    pub fn initialize(
+        &mut self,
+        transfer_executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<()> {
         // Set idle rate to 0 (indefinite) for all reports
-        self.set_idle(0, 0, memory_pool)?;
+        self.set_idle(0, 0, transfer_executor, memory_pool)?;
 
         Ok(())
     }
@@ -203,6 +210,7 @@ impl HidGamepad {
         &mut self,
         duration: u8,
         report_id: u8,
+        transfer_executor: &mut TransferExecutor,
         memory_pool: &mut UsbMemoryPool,
     ) -> Result<()> {
         let setup = SetupPacket {
@@ -213,20 +221,19 @@ impl HidGamepad {
             wLength: 0,
         };
 
-        ControlExecutor::execute_with_retry(
-            setup,
-            self.device_address,
-            self.max_packet_size,
-            memory_pool,
-            3,
-        )?;
+        let mut executor = ControlExecutor::new(transfer_executor, memory_pool);
+        executor.execute_with_retry(setup, self.device_address, self.max_packet_size, 3)?;
 
         self.idle_rate = duration;
         Ok(())
     }
 
     /// Get HID descriptor
-    pub fn get_hid_descriptor(&mut self, memory_pool: &mut UsbMemoryPool) -> Result<HidDescriptor> {
+    pub fn get_hid_descriptor(
+        &mut self,
+        transfer_executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<HidDescriptor> {
         let setup = SetupPacket {
             bmRequestType: 0x81, // Device-to-host, standard, interface
             bRequest: 0x06,      // GET_DESCRIPTOR
@@ -235,13 +242,9 @@ impl HidGamepad {
             wLength: 9, // HID descriptor is 9 bytes minimum
         };
 
-        let data = ControlExecutor::execute_with_retry(
-            setup,
-            self.device_address,
-            self.max_packet_size,
-            memory_pool,
-            3,
-        )?;
+        let mut executor = ControlExecutor::new(transfer_executor, memory_pool);
+        let data =
+            executor.execute_with_retry(setup, self.device_address, self.max_packet_size, 3)?;
 
         if data.len() < 9 {
             return Err(UsbError::InvalidDescriptor);
@@ -448,10 +451,10 @@ fn main() -> ! {
     let ccm_base = 0x400F_C000; // CCM base address
     let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 
-    // Initialize USB host controller
-    let usb1_base = 0x402E_0140; // USB1 base address
+    // Initialize USB host controller (USB2 for host, USB1 for device/debug)
+    let usb2_base = 0x402E_0200; // USB2 EHCI controller
     let controller = unsafe {
-        EhciController::<8, Uninitialized>::new(usb1_base)
+        EhciController::<8, Uninitialized>::new(usb2_base)
             .expect("Failed to create EHCI controller")
     };
 
@@ -463,6 +466,9 @@ fn main() -> ! {
 
     let mut controller = unsafe { controller.start() };
 
+    // Initialize transfer executor
+    let mut transfer_executor = unsafe { TransferExecutor::new(usb2_base) };
+
     // Initialize HID manager
     let mut hid_manager = HidManager::new();
 
@@ -472,7 +478,7 @@ fn main() -> ! {
     loop {
         if !device_connected {
             // Try to find and connect to a gamepad
-            match find_and_init_gamepad(&mut controller, &mut memory_pool) {
+            match find_and_init_gamepad(&mut controller, &mut memory_pool, &mut transfer_executor) {
                 Ok(gamepad) => {
                     match hid_manager.register_gamepad(gamepad) {
                         Ok(index) => {
@@ -505,9 +511,10 @@ fn main() -> ! {
 fn find_and_init_gamepad(
     controller: &mut EhciController<8, Running>,
     memory_pool: &mut UsbMemoryPool,
+    transfer_executor: &mut TransferExecutor,
 ) -> Result<HidGamepad> {
     // Enumerate device
-    let mut enumerator = DeviceEnumerator::new(controller, memory_pool);
+    let mut enumerator = DeviceEnumerator::new(controller, memory_pool, transfer_executor);
     let device = enumerator.enumerate_device()?;
 
     // Check if it's a HID device
@@ -525,7 +532,7 @@ fn find_and_init_gamepad(
     );
 
     // Initialize the gamepad
-    gamepad.initialize(memory_pool)?;
+    gamepad.initialize(transfer_executor, memory_pool)?;
 
     Ok(gamepad)
 }

@@ -21,7 +21,10 @@ use imxrt_ral as ral;
 
 use imxrt_usbh::{
     dma::memory::UsbMemoryPool,
-    ehci::controller::{EhciController, Running, Uninitialized},
+    ehci::{
+        controller::{EhciController, Running, Uninitialized},
+        TransferExecutor,
+    },
     enumeration::{DeviceClass, DeviceEnumerator, EnumeratedDevice},
     phy::UsbPhy,
     transfer::simple_control::{ControlExecutor, SetupPacket},
@@ -604,10 +607,10 @@ fn main() -> ! {
     let ccm_base = 0x400F_C000; // CCM base address
     let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 
-    // Initialize USB host controller
-    let usb1_base = 0x402E_0140; // USB1 base address
+    // Initialize USB host controller (USB2 for host, USB1 for device/debug)
+    let usb2_base = 0x402E_0200; // USB2 EHCI controller
     let controller = unsafe {
-        EhciController::<8, Uninitialized>::new(usb1_base)
+        EhciController::<8, Uninitialized>::new(usb2_base)
             .expect("Failed to create EHCI controller")
     };
 
@@ -619,6 +622,9 @@ fn main() -> ! {
 
     let mut controller = unsafe { controller.start() };
 
+    // Initialize transfer executor
+    let mut transfer_executor = unsafe { TransferExecutor::new(usb2_base) };
+
     // Initialize MSC manager
     let mut msc_manager = MscManager::new();
 
@@ -628,7 +634,11 @@ fn main() -> ! {
     loop {
         if !device_connected {
             // Try to find and connect to a mass storage device
-            match find_and_init_flash_drive(&mut controller, &mut memory_pool) {
+            match find_and_init_flash_drive(
+                &mut controller,
+                &mut memory_pool,
+                &mut transfer_executor,
+            ) {
                 Ok(device) => {
                     match msc_manager.add_device(device) {
                         Ok(device_id) => {
@@ -659,9 +669,10 @@ fn main() -> ! {
 fn find_and_init_flash_drive(
     controller: &mut EhciController<8, Running>,
     memory_pool: &mut UsbMemoryPool,
+    transfer_executor: &mut TransferExecutor,
 ) -> Result<MassStorageDevice> {
     // Enumerate device
-    let mut enumerator = DeviceEnumerator::new(controller, memory_pool);
+    let mut enumerator = DeviceEnumerator::new(controller, memory_pool, transfer_executor);
     let device = enumerator.enumerate_device()?;
 
     // Check if it's a mass storage device

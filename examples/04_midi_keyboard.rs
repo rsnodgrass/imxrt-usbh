@@ -68,13 +68,14 @@ pub mod hardware_addresses {
     /// - USB-specific clock routing
     pub const CCM_BASE_ADDRESS: u32 = 0x400F_C000;
 
-    /// USB1 Host Controller (EHCI) register base address (Reference Manual Section 15.3)
+    /// USB2 Host Controller (EHCI) register base address (Reference Manual Section 15.3)
+    /// USB2 is used for host mode, USB1 is for device/logging
     /// This is the Enhanced Host Controller Interface for USB 2.0:
     /// - USB transfer scheduling and control
     /// - Port status and control registers
     /// - DMA descriptor management
     /// - Interrupt status and control
-    pub const USB1_HOST_BASE_ADDRESS: u32 = 0x402E_0140;
+    pub const USB2_HOST_BASE_ADDRESS: u32 = 0x402E_0200;
 }
 
 // Re-export constants for convenient access
@@ -710,14 +711,14 @@ impl MidiApp {
         let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 
         // Initialize USB host controller with documented register address
-        let usb1_base = USB1_HOST_BASE_ADDRESS as usize; // EHCI controller registers
-        let controller = unsafe { EhciController::<8, Uninitialized>::new(usb1_base)? };
+        let usb2_base = USB2_HOST_BASE_ADDRESS as usize; // USB2 EHCI controller for host mode
+        let controller = unsafe { EhciController::<8, Uninitialized>::new(usb2_base)? };
 
         let controller = unsafe { controller.initialize()? };
         let usb_controller = unsafe { controller.start() };
 
         // Initialize transfer executor
-        let transfer_executor = unsafe { TransferExecutor::new(usb1_base) };
+        let transfer_executor = unsafe { TransferExecutor::new(usb2_base) };
 
         info!("USB host initialized successfully");
         info!("Waiting for MIDI keyboard...\r\n");

@@ -22,7 +22,10 @@ use teensy4_panic as _;
 
 use imxrt_usbh::{
     dma::UsbMemoryPool,
-    ehci::controller::{EhciController, Running, Uninitialized},
+    ehci::{
+        controller::{EhciController, Running, Uninitialized},
+        TransferExecutor,
+    },
     enumeration::{DeviceClass, DeviceEnumerator, EnumeratedDevice},
     phy::UsbPhy,
     transfer::simple_control::{ControlExecutor, SetupPacket},
@@ -402,6 +405,7 @@ impl DeviceManager {
 struct EnumerationApp {
     usb_controller: EhciController<8, Running>,
     memory_pool: UsbMemoryPool,
+    transfer_executor: TransferExecutor,
     device_manager: DeviceManager,
     status_counter: u32,
 }
@@ -419,16 +423,20 @@ impl EnumerationApp {
         let ccm_base = 0x400F_C000;
         let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 
-        // Initialize USB host controller
-        let usb1_base = 0x402E_0140;
-        let controller = unsafe { EhciController::<8, Uninitialized>::new(usb1_base)? };
+        // Initialize USB host controller (USB2 is for host, USB1 is for device/debug)
+        let usb2_base = 0x402E_0200; // USB2 EHCI controller
+        let controller = unsafe { EhciController::<8, Uninitialized>::new(usb2_base)? };
 
         let controller = unsafe { controller.initialize()? };
         let usb_controller = unsafe { controller.start() };
 
+        // Initialize transfer executor
+        let transfer_executor = unsafe { TransferExecutor::new(usb2_base) };
+
         Ok(Self {
             usb_controller,
             memory_pool,
+            transfer_executor,
             device_manager: DeviceManager::new(),
             status_counter: 0,
         })
@@ -453,7 +461,11 @@ impl EnumerationApp {
     }
 
     fn enumerate_any_device(&mut self) -> Result<EnumeratedDevice> {
-        let mut enumerator = DeviceEnumerator::new(&mut self.usb_controller, &mut self.memory_pool);
+        let mut enumerator = DeviceEnumerator::new(
+            &mut self.usb_controller,
+            &mut self.memory_pool,
+            &mut self.transfer_executor,
+        );
         let device = enumerator.enumerate_device()?;
 
         self.device_manager.stats.device_detected();
@@ -504,13 +516,8 @@ impl EnumerationApp {
             wLength: 64,
         };
 
-        let data = ControlExecutor::execute_with_retry(
-            setup,
-            device_address,
-            max_packet_size,
-            &mut self.memory_pool,
-            3,
-        )?;
+        let mut executor = ControlExecutor::new(&mut self.transfer_executor, &mut self.memory_pool);
+        let data = executor.execute_with_retry(setup, device_address, max_packet_size, 3)?;
 
         // Parse UTF-16LE string descriptor
         let mut result = heapless::String::new();
