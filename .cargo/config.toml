@@ -10,7 +10,7 @@ target = "thumbv7em-none-eabihf"
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "linker=lld"]
 
-[target.aarch64-apple-darwin] 
+[target.aarch64-apple-darwin]
 rustflags = ["-C", "linker=lld"]
 
 # Enable optimizations for faster dev builds
@@ -32,3 +32,35 @@ panic = "abort"     # Smaller binary size
 hexify = "objcopy --release --example"
 # Build all examples
 build-examples = "build --release --examples"
+
+# Linter configuration for embedded/no_std project
+[lints.rust]
+# Treat warnings as warnings, not errors (allows build to succeed)
+warnings = "warn"
+
+# Warn on static mut refs so new violations are caught
+static_mut_refs = "warn"
+
+[lints.clippy]
+# Allow interior mutability pattern (UnsafeCell in DMA memory pool)
+mut_from_ref = "allow"
+
+# Documentation lints - warn instead of error for embedded projects
+missing_docs = "warn"
+missing_safety_doc = "warn"
+
+# Common embedded/no_std patterns that trigger false positives
+new_without_default = "allow"  # const fn can't implement Default trait
+too_many_arguments = "allow"   # Hardware register APIs need many parameters
+identity_op = "allow"          # Explicit register offsets for clarity
+declare_interior_mutable_const = "allow"  # AtomicU32 constants in arrays
+
+# Style lints that are too noisy for this codebase
+needless_range_loop = "allow"
+manual_flatten = "allow"
+if_same_then_else = "allow"
+collapsible_if = "allow"
+manual_unwrap_or = "allow"
+implicit_saturating_sub = "allow"
+needless_return = "allow"
+unnecessary_cast = "allow"

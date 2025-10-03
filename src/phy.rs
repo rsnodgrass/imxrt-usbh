@@ -1,5 +1,5 @@
 //! USB PHY initialization and control
-//! 
+//!
 //! Based on i.MX RT1060 Reference Manual sections 14.4-14.5 and 66.5
 //! Implements embedded systems best practices for hardware timing and error recovery
 
@@ -23,7 +23,7 @@ mod timing {
     pub const PLL_LOCK_TIMEOUT_US: u32 = 10_000;
     /// PHY reset hold time (minimum 1μs per RM 66.5.1)
     pub const PHY_RESET_HOLD_TIME_US: u32 = 10;
-    /// PHY power-up stabilization time (1ms per RM 66.5.1) 
+    /// PHY power-up stabilization time (1ms per RM 66.5.1)
     pub const PHY_POWER_STABILIZATION_US: u32 = 1_000;
     /// Clock stabilization time after PLL lock (100μs per RM 14.5.3)
     pub const CLOCK_STABILIZATION_US: u32 = 100;
@@ -67,9 +67,9 @@ pub struct UsbPhy {
 
 impl UsbPhy {
     /// Create a new USB PHY instance
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// Caller must ensure exclusive access to CCM and USBPHY peripherals
     pub unsafe fn new(phy_base: usize, ccm_base: usize) -> Self {
         Self {
@@ -81,42 +81,44 @@ impl UsbPhy {
             ccm_base,
         }
     }
-    
+
     /// Initialize USB PHY for host mode
-    /// 
+    ///
     /// Implements initialization sequence from RM 66.5.1 and AN12042 section 3.1
     /// with proper hardware timing and error recovery
     pub fn init_host_mode(&mut self) -> Result<()> {
         // Step 1: Initialize USB PLL (RM 14.5.3)
         self.init_usb_pll()?;
-        
+
         // Step 2: Reset and configure PHY (RM 66.5.1.2)
         self.reset_phy()?;
-        
+
         // Step 3: Power up PHY with proper timing
         self.power_up_phy()?;
-        
+
         // Step 4: Configure for host mode
         self.configure_host_mode()?;
-        
+
         // Step 5: Calibrate PHY (RM 66.5.1.5)
         self.calibrate_phy()?;
-        
+
         // Step 6: Enable host disconnect detection
         self.enable_host_disconnect_detect();
-        
+
         self.powered.store(true, Ordering::Release);
         Ok(())
     }
-    
+
     /// Reset the USB PHY with proper timing
     fn reset_phy(&mut self) -> Result<()> {
         // Assert soft reset (RM 66.5.1.2 step 1)
         unsafe {
             let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+            cortex_m::asm::dmb();
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
             ctrl |= USBPHY_CTRL_SFTRST;
             core::ptr::write_volatile(ctrl_reg, ctrl);
+            cortex_m::asm::dsb();
         }
 
         // Hold reset for minimum time (RM timing requirement)
@@ -125,9 +127,11 @@ impl UsbPhy {
         // Deassert soft reset and clock gate
         unsafe {
             let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+            cortex_m::asm::dmb();
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
             ctrl &= !(USBPHY_CTRL_SFTRST | USBPHY_CTRL_CLKGATE);
             core::ptr::write_volatile(ctrl_reg, ctrl);
+            cortex_m::asm::dsb();
         }
 
         // Wait for PHY to stabilize
@@ -135,13 +139,15 @@ impl UsbPhy {
 
         Ok(())
     }
-    
+
     /// Initialize USB PLL with hardware timing verification
     fn init_usb_pll(&mut self) -> Result<()> {
         // Step 1: Set bypass and configure PLL (RM 14.5.3)
         unsafe {
             let pll_reg = (self.ccm_base + 0x10) as *mut u32;
+            cortex_m::asm::dmb();
             let mut pll = core::ptr::read_volatile(pll_reg);
+            cortex_m::asm::dmb();
 
             // Set bypass before modifying PLL configuration (RM requirement)
             pll |= USB1_PLL_BYPASS;
@@ -151,7 +157,9 @@ impl UsbPhy {
             pll |= USB1_PLL_DIV_SELECT & 0x3F;
             pll |= USB1_PLL_ENABLE | USB1_PLL_POWER;
 
+            cortex_m::asm::dmb();
             core::ptr::write_volatile(pll_reg, pll);
+            cortex_m::asm::dsb();
         }
 
         // Step 2: Wait for PLL lock with timeout (RM 14.5.3)
@@ -159,7 +167,9 @@ impl UsbPhy {
         timeout.wait_for(|| {
             unsafe {
                 let pll_reg = (self.ccm_base + 0x10) as *const u32;
+                cortex_m::asm::dmb();
                 let pll = core::ptr::read_volatile(pll_reg);
+                cortex_m::asm::dmb();
                 (pll & USB1_PLL_LOCK) != 0
             }
         }).map_err(|_| UsbError::HardwareFailure)?;
@@ -167,10 +177,14 @@ impl UsbPhy {
         // Step 3: Clear bypass after lock confirmed (RM requirement)
         unsafe {
             let pll_reg = (self.ccm_base + 0x10) as *mut u32;
+            cortex_m::asm::dmb();
             let mut pll = core::ptr::read_volatile(pll_reg);
+            cortex_m::asm::dmb();
             pll &= !USB1_PLL_BYPASS;
             pll |= USB1_PLL_EN_USB_CLKS;
+            cortex_m::asm::dmb();
             core::ptr::write_volatile(pll_reg, pll);
+            cortex_m::asm::dsb();
         }
 
         // Wait for clock stabilization
@@ -179,52 +193,64 @@ impl UsbPhy {
 
         Ok(())
     }
-    
+
     /// Power up PHY with monitored sequencing
     fn power_up_phy(&mut self) -> Result<()> {
         // Power up PHY (RM 66.5.1.3)
         unsafe {
             let pwr_reg = (self.phy_base + 0x00) as *mut u32;
+            cortex_m::asm::dmb();
             let mut pwr = core::ptr::read_volatile(pwr_reg);
-            
+            cortex_m::asm::dmb();
+
             // Clear power-down bits
             pwr &= !(1 << 10); // PWDN bit
+            cortex_m::asm::dmb();
             core::ptr::write_volatile(pwr_reg, pwr);
+            cortex_m::asm::dsb();
         }
-        
+
         // Wait for power stabilization with verification
         self.delay_us(timing::PHY_POWER_STABILIZATION_US);
-        
+
         // Verify PHY is responding
         self.verify_phy_response()?;
-        
+
         Ok(())
     }
-    
+
     /// Configure PHY for host mode operation
     fn configure_host_mode(&mut self) -> Result<()> {
         unsafe {
             let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+            cortex_m::asm::dmb();
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
+            cortex_m::asm::dmb();
 
             // Enable host mode features
             ctrl |= USBPHY_CTRL_ENHOSTDISCONDETECT;
             ctrl |= USBPHY_CTRL_HOSTDISCONDETECT_IRQ;
 
+            cortex_m::asm::dmb();
             core::ptr::write_volatile(ctrl_reg, ctrl);
+            cortex_m::asm::dsb();
         }
 
         Ok(())
     }
-    
+
     /// Calibrate PHY with timeout and verification
     fn calibrate_phy(&mut self) -> Result<()> {
         // Start calibration sequence (RM 66.5.1.5)
         unsafe {
             let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+            cortex_m::asm::dmb();
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
+            cortex_m::asm::dmb();
             ctrl |= 1 << 16; // Start calibration
+            cortex_m::asm::dmb();
             core::ptr::write_volatile(ctrl_reg, ctrl);
+            cortex_m::asm::dsb();
         }
 
         // Wait for calibration completion
@@ -232,7 +258,9 @@ impl UsbPhy {
         timeout.wait_for(|| {
             unsafe {
                 let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
+                cortex_m::asm::dmb();
                 let ctrl = core::ptr::read_volatile(ctrl_reg);
+                cortex_m::asm::dmb();
                 (ctrl & (1 << 17)) != 0 // Calibration done
             }
         }).map_err(|_| UsbError::HardwareFailure)?;
@@ -240,30 +268,36 @@ impl UsbPhy {
         self.calibrated.store(true, Ordering::Release);
         Ok(())
     }
-    
+
     /// Enable host disconnect detection with debouncing
     fn enable_host_disconnect_detect(&mut self) {
         unsafe {
             let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+            cortex_m::asm::dmb();
             let mut ctrl = core::ptr::read_volatile(ctrl_reg);
+            cortex_m::asm::dmb();
             ctrl |= USBPHY_CTRL_ENHOSTDISCONDETECT;
+            cortex_m::asm::dmb();
             core::ptr::write_volatile(ctrl_reg, ctrl);
+            cortex_m::asm::dsb();
         }
     }
-    
+
     /// Verify PHY is responding to register accesses
     fn verify_phy_response(&mut self) -> Result<()> {
         // Read CTRL register to verify PHY is accessible
         // (No test register exists in USBPHY per RM 66.6)
         unsafe {
             let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
+            cortex_m::asm::dmb();
             let _ctrl = core::ptr::read_volatile(ctrl_reg);
+            cortex_m::asm::dmb();
             // If read succeeds without bus fault, PHY is responding
         }
 
         Ok(())
     }
-    
+
     /// Hardware-specific microsecond delay implementation
     #[inline(always)]
     fn delay_us(&self, us: u32) {
@@ -275,34 +309,36 @@ impl UsbPhy {
             cortex_m::asm::nop();
         }
     }
-    
+
     /// Check PHY health and attempt recovery if needed
     pub fn health_check_and_recovery(&mut self) -> Result<()> {
         // Check PLL lock status
         let pll_locked = unsafe {
             let pll_reg = (self.ccm_base + 0x10) as *const u32;
+            cortex_m::asm::dmb();
             let pll = core::ptr::read_volatile(pll_reg);
+            cortex_m::asm::dmb();
             (pll & USB1_PLL_LOCK) != 0
         };
-        
+
         if !pll_locked {
             let attempts = self.recovery_attempts.load(Ordering::Relaxed);
             if attempts >= 3 {
                 return Err(UsbError::HardwareFailure);
             }
-            
+
             self.recovery_attempts.fetch_add(1, Ordering::Relaxed);
-            
+
             // Attempt PLL recovery
             self.init_usb_pll()?;
         }
-        
+
         // Verify PHY is still responding
         self.verify_phy_response()?;
-        
+
         Ok(())
     }
-    
+
     /// Get PHY status for diagnostics
     pub fn status(&self) -> PhyStatus {
         PhyStatus {
@@ -312,7 +348,7 @@ impl UsbPhy {
             recovery_attempts: self.recovery_attempts.load(Ordering::Relaxed),
         }
     }
-    
+
     /// Enable USB PHY interrupts
     pub fn enable_interrupts(&mut self) {
         unsafe {

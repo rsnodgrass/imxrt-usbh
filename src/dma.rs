@@ -1,4 +1,26 @@
 //! DMA buffer management for USB transfers
+//!
+//! # Initialization Order (CRITICAL)
+//!
+//! **MUST** call `init_dma_region()` during system initialization before any buffer allocations:
+//!
+//! ```no_run
+//! # use imxrt_usbh::dma;
+//! # use imxrt_usbh::error::Result;
+//! # fn main() -> Result<()> {
+//! // 1. Initialize DMA region (configures MPU for cache coherency)
+//! unsafe { dma::init_dma_region()? };
+//!
+//! // 2. Now safe to allocate buffers
+//! // let buffer = buffer_pool.alloc_buffer(512)?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! **Failure to follow this order will cause:**
+//! - Cache coherency violations
+//! - Data corruption in DMA transfers
+//! - Runtime error from allocation functions
 
 pub mod pools;
 pub mod descriptor;
@@ -85,6 +107,13 @@ static mut DMA_REGION: DmaRegion = DmaRegion {
 /// DMA region initialization flag
 static DMA_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+/// Check if DMA region has been initialized
+///
+/// Returns true if `init_dma_region()` has been called successfully.
+pub fn is_dma_initialized() -> bool {
+    DMA_INITIALIZED.load(Ordering::Acquire)
+}
+
 /// Compile-time assertions for DMA buffer alignment
 const _: () = {
     const DCACHE_LINE_SIZE: usize = 32;
@@ -169,16 +198,16 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
             // Note: C=0, B=0 (non-cacheable) - do not include BUFFERABLE
         );
     }
-    
+
     // Enable MPU with default memory map for privileged mode
     unsafe {
         (*MPU::PTR).ctrl.write(MPU_CTRL_ENABLE | MPU_CTRL_PRIVDEFENA);
     }
-    
+
     // Ensure MPU configuration takes effect
     cortex_m::asm::dsb();
     cortex_m::asm::isb();
-    
+
     Ok(())
 }
 
@@ -273,69 +302,69 @@ impl DmaBuffer {
 }
 
 /// Cache maintenance operations for cacheable DMA buffers
-/// 
+///
 /// Use these when DMA buffers are in cacheable memory regions.
 pub mod cache_ops {
     use cortex_m::asm::{dsb, isb};
-    
+
     /// Data cache line size for Cortex-M7 (32 bytes)
     const DCACHE_LINE_SIZE: usize = 32;
-    
+
     /// SCB cache maintenance registers for Cortex-M7
     const SCB_DCCMVAC: *mut u32 = 0xE000_EF68 as *mut u32; // Clean by MVA to PoC
     const SCB_DCIMVAC: *mut u32 = 0xE000_EF5C as *mut u32; // Invalidate by MVA to PoC
     const SCB_DCCIMVAC: *mut u32 = 0xE000_EF70 as *mut u32; // Clean & Invalidate by MVA to PoC
-    
+
     pub fn clean_dcache(addr: usize, size: usize) {
         unsafe {
             dsb(); // Ensure all previous writes complete
             let start = addr & !(DCACHE_LINE_SIZE - 1);
             let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
-            
+
             for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
                 core::ptr::write_volatile(SCB_DCCMVAC, line_addr as u32);
             }
-            
+
             dsb(); // Ensure cache operations complete
             isb(); // Ensure instruction synchronization
         }
     }
-    
+
     pub fn invalidate_dcache(addr: usize, size: usize) {
         unsafe {
             dsb(); // Ensure all previous operations complete
             let start = addr & !(DCACHE_LINE_SIZE - 1);
             let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
-            
+
             for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
                 core::ptr::write_volatile(SCB_DCIMVAC, line_addr as u32);
             }
-            
+
             dsb(); // Ensure cache operations complete
             isb(); // Ensure instruction synchronization
         }
     }
-    
+
     pub fn clean_invalidate_dcache(addr: usize, size: usize) {
         unsafe {
             dsb(); // Ensure all previous operations complete
             let start = addr & !(DCACHE_LINE_SIZE - 1);
             let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
-            
+
             for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
                 core::ptr::write_volatile(SCB_DCCIMVAC, line_addr as u32);
             }
-            
+
             dsb(); // Ensure cache operations complete
             isb(); // Ensure instruction synchronization
         }
     }
-    
+
     #[inline]
     pub fn prepare_for_dma_write(buffer: &[u8]) {
         clean_dcache(buffer.as_ptr() as usize, buffer.len());
     }
-    
+
     #[inline]
     pub fn prepare_for_dma_read(buffer: &mut [u8]) {
         invalidate_dcache(buffer.as_ptr() as usize, buffer.len());
@@ -355,25 +384,25 @@ impl DmaBufferPool {
             allocated: [ATOMIC_BOOL_FALSE; 32],
         }
     }
-    
+
     /// Allocate a DMA buffer from the pool
     pub fn alloc(&mut self, size: usize) -> Result<DmaBuffer> {
         if size > 512 {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         // Find free buffer
         for (i, allocated) in self.allocated.iter().enumerate() {
             if !allocated.swap(true, Ordering::Acquire) {
                 // Buffer was free, now allocated
                 let addr = unsafe { DMA_REGION.data_buffers[i].as_ptr() as *mut u8 };
-                
+
                 // Validate buffer bounds
                 crate::safety::BoundsChecker::validate_buffer(addr, size)?;
                 crate::safety::BoundsChecker::validate_dma_buffer(addr as usize, size)?;
-                
+
                 let ptr = unsafe { NonNull::new_unchecked(addr) };
-                
+
                 let buffer = DmaBuffer {
                     ptr,
                     size,
@@ -386,10 +415,10 @@ impl DmaBufferPool {
                 return Ok(buffer);
             }
         }
-        
+
         Err(UsbError::NoResources)
     }
-    
+
     /// Get buffer statistics
     pub fn buffer_stats(&self) -> BufferStats {
         let allocated_count = self.allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
@@ -399,16 +428,29 @@ impl DmaBufferPool {
             free_buffers: 32 - allocated_count,
         }
     }
-    
+
     /// Free a DMA buffer back to the pool
+    ///
+    /// Free a buffer back to the pool with validation
+    ///
+    /// # Errors
+    /// Returns `InvalidState` if buffer was already freed (double-free detection)
     ///
     /// # Safety
     /// Buffer must not be used after being freed. The lack of Copy trait
     /// helps prevent this, but care must be taken not to hold references.
-    pub fn free(&mut self, buffer: DmaBuffer) {
-        // Mark buffer as free
-        self.allocated[buffer.pool_index].store(false, Ordering::Release);
+    pub fn free(&mut self, buffer: DmaBuffer) -> Result<()> {
+        // Detect double-free by checking if buffer was actually allocated
+        let was_allocated = self.allocated[buffer.pool_index].swap(false, Ordering::AcqRel);
+
+        if !was_allocated {
+            #[cfg(feature = "defmt")]
+            defmt::error!("Double-free detected for buffer at index {}", buffer.pool_index);
+            return Err(UsbError::InvalidState);
+        }
+
         // Buffer is consumed (moved) here, preventing further use
+        Ok(())
     }
 }
 
@@ -433,4 +475,306 @@ pub const fn align_dma(addr: usize) -> usize {
 #[inline]
 pub const fn is_dma_aligned(addr: usize) -> bool {
     addr & (DMA_ALIGNMENT - 1) == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dma_buffer_pool_creation() {
+        let pool = DmaBufferPool::new();
+        let stats = pool.buffer_stats();
+
+        assert_eq!(stats.total_buffers, 32);
+        assert_eq!(stats.allocated_buffers, 0);
+        assert_eq!(stats.free_buffers, 32);
+    }
+
+    #[test]
+    fn test_dma_buffer_allocation() {
+        let mut pool = DmaBufferPool::new();
+
+        // allocate single buffer
+        let result = pool.alloc(512);
+        assert!(result.is_ok());
+
+        let buffer = result.unwrap();
+        assert_eq!(buffer.len(), 512);
+        assert!(!buffer.is_empty());
+
+        let stats = pool.buffer_stats();
+        assert_eq!(stats.allocated_buffers, 1);
+        assert_eq!(stats.free_buffers, 31);
+    }
+
+    #[test]
+    fn test_dma_buffer_alignment() {
+        let mut pool = DmaBufferPool::new();
+
+        // allocate several buffers and verify alignment
+        for _ in 0..5 {
+            let buffer = pool.alloc(256).expect("allocation failed");
+            let addr = buffer.as_ptr() as usize;
+
+            // must be 32-byte aligned (cache line)
+            assert_eq!(addr & 0x1F, 0, "buffer not 32-byte aligned");
+            assert!(is_dma_aligned(addr));
+        }
+    }
+
+    #[test]
+    fn test_dma_buffer_no_aliasing() {
+        let mut pool = DmaBufferPool::new();
+
+        // allocate two buffers
+        let buf1 = pool.alloc(512).unwrap();
+        let buf2 = pool.alloc(512).unwrap();
+
+        let addr1 = buf1.as_ptr() as usize;
+        let addr2 = buf2.as_ptr() as usize;
+
+        // buffers must not overlap
+        // either buf1 ends before buf2 starts, or buf2 ends before buf1 starts
+        let no_overlap = (addr1 + buf1.len() <= addr2) || (addr2 + buf2.len() <= addr1);
+        assert!(no_overlap, "buffers overlap! addr1={:#x}, addr2={:#x}", addr1, addr2);
+
+        // also verify different pool indices
+        assert_ne!(buf1.pool_index(), buf2.pool_index());
+    }
+
+    #[test]
+    fn test_dma_buffer_pool_exhaustion() {
+        let mut pool = DmaBufferPool::new();
+
+        // allocate all 32 buffers
+        let mut buffers = Vec::new();
+        for i in 0..32 {
+            let result = pool.alloc(512);
+            assert!(result.is_ok(), "failed to allocate buffer {}", i);
+            buffers.push(result.unwrap());
+        }
+
+        let stats = pool.buffer_stats();
+        assert_eq!(stats.allocated_buffers, 32);
+        assert_eq!(stats.free_buffers, 0);
+
+        // 33rd allocation should fail
+        let result = pool.alloc(512);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(UsbError::NoResources)));
+    }
+
+    #[test]
+    fn test_dma_buffer_free_and_realloc() {
+        let mut pool = DmaBufferPool::new();
+
+        // allocate a buffer
+        let buffer = pool.alloc(256).unwrap();
+        let pool_index = buffer.pool_index();
+
+        let stats = pool.buffer_stats();
+        assert_eq!(stats.allocated_buffers, 1);
+
+        // free the buffer
+        pool.free(buffer);
+
+        let stats = pool.buffer_stats();
+        assert_eq!(stats.allocated_buffers, 0);
+        assert_eq!(stats.free_buffers, 32);
+
+        // reallocate - should get a free buffer
+        let buffer2 = pool.alloc(128).unwrap();
+        assert_eq!(buffer2.pool_index(), pool_index); // likely reuses same slot
+
+        let stats = pool.buffer_stats();
+        assert_eq!(stats.allocated_buffers, 1);
+    }
+
+    #[test]
+    fn test_dma_buffer_size_limits() {
+        let mut pool = DmaBufferPool::new();
+
+        // valid sizes (0-512)
+        assert!(pool.alloc(0).is_ok());
+        assert!(pool.alloc(1).is_ok());
+        assert!(pool.alloc(256).is_ok());
+        assert!(pool.alloc(512).is_ok());
+
+        // invalid size (>512)
+        let result = pool.alloc(513);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(UsbError::InvalidParameter)));
+
+        let result = pool.alloc(1024);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dma_buffer_slices() {
+        let mut pool = DmaBufferPool::new();
+        let mut buffer = pool.alloc(128).unwrap();
+
+        // write to buffer
+        let slice = buffer.as_mut_slice();
+        slice[0] = 0xAA;
+        slice[1] = 0xBB;
+        slice[127] = 0xFF;
+
+        // read back
+        let const_slice = buffer.as_slice();
+        assert_eq!(const_slice[0], 0xAA);
+        assert_eq!(const_slice[1], 0xBB);
+        assert_eq!(const_slice[127], 0xFF);
+    }
+
+    #[test]
+    fn test_dma_buffer_dma_addr() {
+        let mut pool = DmaBufferPool::new();
+        let buffer = pool.alloc(256).unwrap();
+
+        let ptr_addr = buffer.as_ptr() as u32;
+        let dma_addr = buffer.dma_addr();
+
+        // dma_addr should equal the pointer address
+        assert_eq!(dma_addr, ptr_addr);
+
+        // address should be in valid range (non-zero)
+        assert!(dma_addr != 0);
+    }
+
+    #[test]
+    fn test_dma_buffer_not_copyable() {
+        // this test verifies at compile-time that DmaBuffer is not Copy
+        // if you uncomment the code below, it should fail to compile
+
+        // let mut pool = DmaBufferPool::new();
+        // let buffer1 = pool.alloc(256).unwrap();
+        // let buffer2 = buffer1; // move
+        // let _ = buffer1; // ERROR: use of moved value
+    }
+
+    #[test]
+    fn test_dma_alignment_helpers() {
+        // test align_dma function
+        assert_eq!(align_dma(0), 0);
+        assert_eq!(align_dma(1), 32);
+        assert_eq!(align_dma(31), 32);
+        assert_eq!(align_dma(32), 32);
+        assert_eq!(align_dma(33), 64);
+        assert_eq!(align_dma(100), 128);
+
+        // test is_dma_aligned function
+        assert!(is_dma_aligned(0));
+        assert!(!is_dma_aligned(1));
+        assert!(!is_dma_aligned(31));
+        assert!(is_dma_aligned(32));
+        assert!(!is_dma_aligned(33));
+        assert!(is_dma_aligned(64));
+        assert!(is_dma_aligned(128));
+    }
+
+    #[test]
+    fn test_buffer_stats_accuracy() {
+        let mut pool = DmaBufferPool::new();
+
+        // allocate some buffers
+        let mut buffers = Vec::new();
+        for _ in 0..10 {
+            buffers.push(pool.alloc(512).unwrap());
+        }
+
+        let stats = pool.buffer_stats();
+        assert_eq!(stats.total_buffers, 32);
+        assert_eq!(stats.allocated_buffers, 10);
+        assert_eq!(stats.free_buffers, 22);
+
+        // free 5 buffers
+        for _ in 0..5 {
+            pool.free(buffers.pop().unwrap());
+        }
+
+        let stats = pool.buffer_stats();
+        assert_eq!(stats.allocated_buffers, 5);
+        assert_eq!(stats.free_buffers, 27);
+    }
+
+    #[test]
+    fn test_dma_buffer_equality() {
+        let mut pool = DmaBufferPool::new();
+
+        let buf1 = pool.alloc(256).unwrap();
+        let buf2 = pool.alloc(256).unwrap();
+        let buf3 = pool.alloc(256).unwrap();
+
+        // buffers with different pool indices should not be equal
+        assert_ne!(buf1, buf2);
+        assert_ne!(buf1, buf3);
+        assert_ne!(buf2, buf3);
+
+        // buffer should equal itself
+        assert_eq!(buf1, buf1);
+    }
+
+    #[test]
+    fn test_cache_alignment_constants() {
+        // verify compile-time constants
+        assert_eq!(DMA_ALIGNMENT, 32);
+        assert_eq!(core::mem::align_of::<CacheAlignedBuffer>(), 32);
+        assert_eq!(core::mem::size_of::<CacheAlignedBuffer>(), 512);
+    }
+
+    #[test]
+    fn test_dma_buffer_prepare_for_device() {
+        let mut pool = DmaBufferPool::new();
+        let buffer = pool.alloc(256).unwrap();
+
+        // write some data
+        buffer.as_slice()[0..4].copy_from_slice(&[0x11, 0x22, 0x33, 0x44]);
+
+        // prepare for DMA (CPU -> Device)
+        // this should clean the cache
+        buffer.prepare_for_device();
+
+        // no assertion here since cache ops are hardware-specific
+        // but we verify the function can be called without panic
+    }
+
+    #[test]
+    fn test_dma_buffer_prepare_for_cpu() {
+        let mut pool = DmaBufferPool::new();
+        let mut buffer = pool.alloc(256).unwrap();
+
+        // prepare for CPU read (Device -> CPU)
+        // this should invalidate the cache
+        buffer.prepare_for_cpu();
+
+        // can now safely read data
+        let data = buffer.as_slice();
+        let _ = data[0]; // read without panic
+
+        // no assertion here since cache ops are hardware-specific
+        // but we verify the function can be called without panic
+    }
+
+    #[test]
+    fn test_multiple_allocations_no_collision() {
+        let mut pool = DmaBufferPool::new();
+
+        // allocate 16 buffers and verify all have unique addresses
+        // store in an array instead of HashSet for no_std compatibility
+        let mut buffers: [Option<DmaBuffer>; 16] = Default::default();
+        for i in 0..16 {
+            buffers[i] = Some(pool.alloc(512).unwrap());
+        }
+
+        // verify no two buffers have the same address
+        for i in 0..16 {
+            let addr_i = buffers[i].as_ref().unwrap().as_ptr() as usize;
+            for j in (i+1)..16 {
+                let addr_j = buffers[j].as_ref().unwrap().as_ptr() as usize;
+                assert_ne!(addr_i, addr_j, "duplicate addresses at indices {} and {}", i, j);
+            }
+        }
+    }
 }

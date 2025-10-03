@@ -1,5 +1,5 @@
 //! Zero-allocation DMA buffer pools with compile-time sizing
-//! 
+//!
 //! Implements the memory pool improvements from the expert review
 
 use crate::error::{Result, UsbError};
@@ -21,7 +21,7 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
         const UNINIT_QH: MaybeUninit<QueueHead> = MaybeUninit::uninit();
         const UNINIT_QTD: MaybeUninit<QueueTD> = MaybeUninit::uninit();
         const ATOMIC_FALSE: AtomicBool = AtomicBool::new(false);
-        
+
         Self {
             qh_memory: [UNINIT_QH; N_QH],
             qtd_memory: [UNINIT_QTD; N_QTD],
@@ -29,7 +29,7 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
             qtd_allocated: [ATOMIC_FALSE; N_QTD],
         }
     }
-    
+
     /// Allocate queue head from pool
     pub fn alloc_qh(&mut self) -> Option<&mut QueueHead> {
         for (i, allocated) in self.qh_allocated.iter().enumerate() {
@@ -43,7 +43,7 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
         }
         None
     }
-    
+
     /// Allocate queue transfer descriptor from pool
     pub fn alloc_qtd(&mut self) -> Option<&mut QueueTD> {
         for (i, allocated) in self.qtd_allocated.iter().enumerate() {
@@ -57,7 +57,7 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
         }
         None
     }
-    
+
     /// Free queue head back to pool
     pub unsafe fn free_qh(&mut self, qh: &mut QueueHead) {
         let qh_addr = qh as *mut QueueHead as usize;
@@ -67,7 +67,7 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
             self.qh_allocated[index].store(false, Ordering::Release);
         }
     }
-    
+
     /// Free queue transfer descriptor back to pool
     pub unsafe fn free_qtd(&mut self, qtd: &mut QueueTD) {
         let qtd_addr = qtd as *mut QueueTD as usize;
@@ -77,12 +77,12 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
             self.qtd_allocated[index].store(false, Ordering::Release);
         }
     }
-    
+
     /// Get pool utilization statistics
     pub fn stats(&self) -> PoolStats {
         let qh_used = self.qh_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
         let qtd_used = self.qtd_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
-        
+
         PoolStats {
             qh_total: N_QH,
             qh_available: N_QH - qh_used,
@@ -113,27 +113,27 @@ impl PoolStats {
 /// Static pools for different use cases
 pub mod static_pools {
     use super::*;
-    
+
     /// Small pool for basic enumeration (8 QH, 32 qTD)
     pub static SMALL_POOL: UsbDescriptorPool<8, 32> = UsbDescriptorPool::new();
-    
-    /// Medium pool for typical applications (16 QH, 64 qTD) 
+
+    /// Medium pool for typical applications (16 QH, 64 qTD)
     pub static MEDIUM_POOL: UsbDescriptorPool<16, 64> = UsbDescriptorPool::new();
-    
+
     /// Large pool for high-throughput applications (32 QH, 128 qTD)
     pub static LARGE_POOL: UsbDescriptorPool<32, 128> = UsbDescriptorPool::new();
-    
+
     /// Initialize all static pools (call once at startup)
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// Must be called exactly once during system initialization
     pub unsafe fn init_all() {
         // Pools are self-contained now, no external initialization needed
     }
 }
 
-/// Buffer pool for data transfers with different size classes  
+/// Buffer pool for data transfers with different size classes
 pub struct DataBufferPool<const N_SMALL: usize, const N_LARGE: usize> {
     small_buffers: [[u8; 64]; N_SMALL],
     large_buffers: [[u8; 512]; N_LARGE],
@@ -144,7 +144,7 @@ pub struct DataBufferPool<const N_SMALL: usize, const N_LARGE: usize> {
 impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE> {
     pub const fn new() -> Self {
         const ATOMIC_FALSE: AtomicBool = AtomicBool::new(false);
-        
+
         Self {
             small_buffers: [[0; 64]; N_SMALL],
             large_buffers: [[0; 512]; N_LARGE],
@@ -152,9 +152,21 @@ impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE
             large_allocated: [ATOMIC_FALSE; N_LARGE],
         }
     }
-    
+
     /// Allocate appropriate buffer size based on request
+    ///
+    /// # Safety Requirements
+    ///
+    /// DMA region must be initialized via `init_dma_region()` before calling this function.
+    /// Failure to do so may result in cache coherency issues and data corruption.
     pub fn alloc_buffer(&mut self, size: usize) -> Result<BufferHandle> {
+        // Verify DMA region is initialized
+        if !crate::dma::is_dma_initialized() {
+            #[cfg(feature = "defmt")]
+            defmt::error!("DMA buffer allocation attempted before init_dma_region() called");
+            return Err(UsbError::InvalidState);
+        }
+
         if size <= 64 {
             for (i, allocated) in self.small_allocated.iter().enumerate() {
                 if !allocated.swap(true, Ordering::Acquire) {
@@ -173,7 +185,7 @@ impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE
             Err(UsbError::BufferOverflow)
         }
     }
-    
+
     /// Get buffer slice from handle
     pub fn get_buffer_slice(&self, handle: &BufferHandle) -> &[u8] {
         match handle {
@@ -181,7 +193,7 @@ impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE
             BufferHandle::Large(i) => &self.large_buffers[*i],
         }
     }
-    
+
     /// Get mutable buffer slice from handle
     pub fn get_buffer_slice_mut(&mut self, handle: &BufferHandle) -> &mut [u8] {
         match handle {
@@ -189,7 +201,7 @@ impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE
             BufferHandle::Large(i) => &mut self.large_buffers[*i],
         }
     }
-    
+
     /// Free buffer back to pool
     pub fn free_buffer(&mut self, handle: BufferHandle) {
         match handle {
@@ -205,16 +217,16 @@ impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE
             }
         }
     }
-    
+
     /// Get buffer pool statistics
     pub fn pool_stats(&self) -> DataBufferStats {
         let small_used = self.small_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
         let large_used = self.large_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
-        
+
         DataBufferStats {
             small_total: N_SMALL,
             small_allocated: small_used,
-            large_total: N_LARGE, 
+            large_total: N_LARGE,
             large_allocated: large_used,
         }
     }
@@ -249,12 +261,12 @@ impl BufferHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_pool_creation() {
         let pool: UsbDescriptorPool<4, 8> = UsbDescriptorPool::new();
         let stats = pool.stats();
-        
+
         assert_eq!(stats.qh_total, 4);
         assert_eq!(stats.qtd_total, 8);
     }
