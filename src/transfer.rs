@@ -1,18 +1,23 @@
 //! USB transfer management and state machines
-//! 
+//!
 //! Implements control, bulk, interrupt, and isochronous transfer types.
 
 use crate::error::UsbError;
 
-pub mod control;
-pub mod simple_control;
 pub mod bulk;
+pub mod control;
 pub mod interrupt;
 pub mod isochronous;
+pub mod simple_control;
 
-pub use bulk::{BulkTransfer, BulkTransferManager, BulkState, bulk_endpoint};
-pub use interrupt::{InterruptTransfer, InterruptTransferManager, InterruptState, interrupt_endpoint};
-pub use isochronous::{IsochronousTransfer, IsochronousTransferManager, IsochronousState, MicroframeTiming, isochronous_endpoint};
+pub use bulk::{bulk_endpoint, BulkState, BulkTransfer, BulkTransferManager};
+pub use interrupt::{
+    interrupt_endpoint, InterruptState, InterruptTransfer, InterruptTransferManager,
+};
+pub use isochronous::{
+    isochronous_endpoint, IsochronousState, IsochronousTransfer, IsochronousTransferManager,
+    MicroframeTiming,
+};
 
 /// USB transfer types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,7 +63,7 @@ impl SetupPacket {
             length,
         }
     }
-    
+
     /// Create SET_ADDRESS request
     pub fn set_address(address: u8) -> Self {
         Self {
@@ -69,7 +74,7 @@ impl SetupPacket {
             length: 0,
         }
     }
-    
+
     /// Create SET_CONFIGURATION request
     pub fn set_configuration(configuration: u8) -> Self {
         Self {
@@ -80,7 +85,7 @@ impl SetupPacket {
             length: 0,
         }
     }
-    
+
     /// Check if this is an IN transfer
     pub fn is_in(&self) -> bool {
         (self.request_type & 0x80) != 0

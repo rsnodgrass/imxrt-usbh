@@ -11,10 +11,10 @@
 
 mod common;
 
-use common::{create_mock_buffer, assert_buffer_aligned};
+use common::{assert_buffer_aligned, create_mock_buffer};
 use imxrt_usbh::transfer::{
-    BulkTransferManager, InterruptTransferManager, IsochronousTransferManager,
-    Direction, MicroframeTiming,
+    BulkTransferManager, Direction, InterruptTransferManager, IsochronousTransferManager,
+    MicroframeTiming,
 };
 use imxrt_usbh::{BulkTransfer, InterruptTransfer, IsochronousTransfer};
 
@@ -71,7 +71,6 @@ mod tests {
         }
     }
 
-
     /// Test resource exhaustion with multiple transfer types
     #[test]
     fn test_multi_type_resource_limits() {
@@ -81,13 +80,17 @@ mod tests {
         // Fill bulk manager
         for i in 0..2 {
             let buf = create_mock_buffer(512, i);
-            assert!(bulk_mgr.submit(Direction::In, 1, 0x81, 64, buf, 1000).is_ok());
+            assert!(bulk_mgr
+                .submit(Direction::In, 1, 0x81, 64, buf, 1000)
+                .is_ok());
         }
 
         // Fill interrupt manager
         for i in 2..4 {
             let buf = create_mock_buffer(64, i);
-            assert!(int_mgr.submit(Direction::In, 1, 0x82, 8, buf, 10, true).is_ok());
+            assert!(int_mgr
+                .submit(Direction::In, 1, 0x82, 8, buf, 10, true)
+                .is_ok());
         }
 
         // Both should be at capacity
@@ -96,12 +99,15 @@ mod tests {
 
         // Next allocations should fail
         let buf = create_mock_buffer(512, 4);
-        assert!(bulk_mgr.submit(Direction::In, 1, 0x81, 64, buf, 1000).is_err());
+        assert!(bulk_mgr
+            .submit(Direction::In, 1, 0x81, 64, buf, 1000)
+            .is_err());
 
         let buf = create_mock_buffer(64, 5);
-        assert!(int_mgr.submit(Direction::In, 1, 0x82, 8, buf, 10, true).is_err());
+        assert!(int_mgr
+            .submit(Direction::In, 1, 0x82, 8, buf, 10, true)
+            .is_err());
     }
-
 }
 
 #[cfg(all(test, not(feature = "std")))]

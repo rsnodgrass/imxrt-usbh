@@ -147,7 +147,12 @@ impl ErrorRecovery {
         };
 
         #[cfg(feature = "defmt")]
-        defmt::debug!("Error recovery: {:?} -> {:?} (retry {})", error_type, action, retry_count);
+        defmt::debug!(
+            "Error recovery: {:?} -> {:?} (retry {})",
+            error_type,
+            action,
+            retry_count
+        );
 
         match action {
             RecoveryAction::Retry => {
@@ -323,9 +328,18 @@ mod tests {
 
     #[test]
     fn test_error_type_recovery() {
-        assert_eq!(ErrorType::TransactionError.recovery_action(), RecoveryAction::Retry);
-        assert_eq!(ErrorType::Stall.recovery_action(), RecoveryAction::ResetEndpoint);
-        assert_eq!(ErrorType::Babble.recovery_action(), RecoveryAction::ResetPort);
+        assert_eq!(
+            ErrorType::TransactionError.recovery_action(),
+            RecoveryAction::Retry
+        );
+        assert_eq!(
+            ErrorType::Stall.recovery_action(),
+            RecoveryAction::ResetEndpoint
+        );
+        assert_eq!(
+            ErrorType::Babble.recovery_action(),
+            RecoveryAction::ResetPort
+        );
     }
 
     #[test]

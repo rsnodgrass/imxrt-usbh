@@ -3,8 +3,8 @@
 //! EHCI periodic schedule uses a 1024-entry frame list for time-sensitive transfers.
 //! Each entry can point to Queue Heads (for interrupt) or iTD/siTD (for isochronous).
 
-use crate::error::{Result, UsbError};
 use crate::ehci::qh::QueueHead;
+use crate::error::{Result, UsbError};
 use core::sync::atomic::{AtomicU32, Ordering};
 
 /// Frame list size (1024 entries per EHCI spec)
@@ -325,10 +325,7 @@ mod tests {
 
         // All entries should be terminated
         for i in 0..FRAME_LIST_SIZE {
-            assert_eq!(
-                frame_list.entries[i].load(Ordering::Relaxed),
-                TERMINATE
-            );
+            assert_eq!(frame_list.entries[i].load(Ordering::Relaxed), TERMINATE);
         }
     }
 

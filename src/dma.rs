@@ -22,18 +22,18 @@
 //! - Data corruption in DMA transfers
 //! - Runtime error from allocation functions
 
-pub mod pools;
 pub mod descriptor;
 pub mod memory;
+pub mod pools;
 
-pub use pools::{UsbDescriptorPool, DataBufferPool, BufferHandle, PoolStats};
-pub use descriptor::{DescriptorAllocator, QhHandle, QtdHandle, DescriptorState};
+pub use descriptor::{DescriptorAllocator, DescriptorState, QhHandle, QtdHandle};
 pub use memory::UsbMemoryPool;
+pub use pools::{BufferHandle, DataBufferPool, PoolStats, UsbDescriptorPool};
 
+use crate::error::{Result, UsbError};
 use core::mem::size_of;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
-use crate::error::{Result, UsbError};
 
 /// DMA buffer alignment requirement (32-byte for cache line)
 pub const DMA_ALIGNMENT: usize = 32;
@@ -80,7 +80,7 @@ impl CacheAlignedBuffer {
 #[repr(C, align(4096))]
 pub struct DmaRegion {
     /// Queue Head pool (aligned to 64 bytes per EHCI spec)
-    pub qh_pool: [u8; 64 * 64],  // 64 QHs, 64 bytes each
+    pub qh_pool: [u8; 64 * 64], // 64 QHs, 64 bytes each
     /// Queue Transfer Descriptor pool (aligned to 32 bytes per EHCI spec)
     pub qtd_pool: [u8; 256 * 32], // 256 qTDs, 32 bytes each
     /// Data buffers for transfers (cache-line aligned)
@@ -93,14 +93,38 @@ static mut DMA_REGION: DmaRegion = DmaRegion {
     qh_pool: [0; 64 * 64],
     qtd_pool: [0; 256 * 32],
     data_buffers: [
-        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(), CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
+        CacheAlignedBuffer::new(),
     ],
 };
 
@@ -171,12 +195,12 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
     const MPU_CTRL_PRIVDEFENA: u32 = 0x04;
 
     const MPU_RASR_ENABLE: u32 = 0x01;
-    const MPU_RASR_SIZE_32KB: u32 = 14 << 1;  // 2^(14+1) = 32KB (covers 28KB DMA region)
-    const MPU_RASR_AP_RW: u32 = 0b011 << 24;  // Read/Write access
+    const MPU_RASR_SIZE_32KB: u32 = 14 << 1; // 2^(14+1) = 32KB (covers 28KB DMA region)
+    const MPU_RASR_AP_RW: u32 = 0b011 << 24; // Read/Write access
     const MPU_RASR_TEX_NORMAL: u32 = 0b001 << 19; // Normal memory (not Device)
     const MPU_RASR_SHAREABLE: u32 = 1 << 18;
     // C=0, B=0 for non-cacheable (do not set CACHEABLE or BUFFERABLE bits)
-    const MPU_RASR_XN: u32 = 1 << 28;  // Execute never
+    const MPU_RASR_XN: u32 = 1 << 28; // Execute never
 
     // Disable MPU during configuration
     unsafe {
@@ -186,7 +210,7 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
 
     // Configure region 7 for DMA
     unsafe {
-        (*MPU::PTR).rnr.write(7);  // Select region 7
+        (*MPU::PTR).rnr.write(7); // Select region 7
         (*MPU::PTR).rbar.write(addr as u32 & !0x1F); // Base address (32-byte aligned)
         (*MPU::PTR).rasr.write(
             MPU_RASR_ENABLE |
@@ -194,14 +218,15 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
             MPU_RASR_AP_RW |
             MPU_RASR_TEX_NORMAL |  // Normal Non-cacheable
             MPU_RASR_SHAREABLE |
-            MPU_RASR_XN
-            // Note: C=0, B=0 (non-cacheable) - do not include BUFFERABLE
+            MPU_RASR_XN, // Note: C=0, B=0 (non-cacheable) - do not include BUFFERABLE
         );
     }
 
     // Enable MPU with default memory map for privileged mode
     unsafe {
-        (*MPU::PTR).ctrl.write(MPU_CTRL_ENABLE | MPU_CTRL_PRIVDEFENA);
+        (*MPU::PTR)
+            .ctrl
+            .write(MPU_CTRL_ENABLE | MPU_CTRL_PRIVDEFENA);
     }
 
     // Ensure MPU configuration takes effect
@@ -421,7 +446,11 @@ impl DmaBufferPool {
 
     /// Get buffer statistics
     pub fn buffer_stats(&self) -> BufferStats {
-        let allocated_count = self.allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
+        let allocated_count = self
+            .allocated
+            .iter()
+            .filter(|a| a.load(Ordering::Relaxed))
+            .count();
         BufferStats {
             total_buffers: 32,
             allocated_buffers: allocated_count,
@@ -445,7 +474,10 @@ impl DmaBufferPool {
 
         if !was_allocated {
             #[cfg(feature = "defmt")]
-            defmt::error!("Double-free detected for buffer at index {}", buffer.pool_index);
+            defmt::error!(
+                "Double-free detected for buffer at index {}",
+                buffer.pool_index
+            );
             return Err(UsbError::InvalidState);
         }
 
@@ -537,7 +569,11 @@ mod tests {
         // buffers must not overlap
         // either buf1 ends before buf2 starts, or buf2 ends before buf1 starts
         let no_overlap = (addr1 + buf1.len() <= addr2) || (addr2 + buf2.len() <= addr1);
-        assert!(no_overlap, "buffers overlap! addr1={:#x}, addr2={:#x}", addr1, addr2);
+        assert!(
+            no_overlap,
+            "buffers overlap! addr1={:#x}, addr2={:#x}",
+            addr1, addr2
+        );
 
         // also verify different pool indices
         assert_ne!(buf1.pool_index(), buf2.pool_index());
@@ -771,9 +807,13 @@ mod tests {
         // verify no two buffers have the same address
         for i in 0..16 {
             let addr_i = buffers[i].as_ref().unwrap().as_ptr() as usize;
-            for j in (i+1)..16 {
+            for j in (i + 1)..16 {
                 let addr_j = buffers[j].as_ref().unwrap().as_ptr() as usize;
-                assert_ne!(addr_i, addr_j, "duplicate addresses at indices {} and {}", i, j);
+                assert_ne!(
+                    addr_i, addr_j,
+                    "duplicate addresses at indices {} and {}",
+                    i, j
+                );
             }
         }
     }

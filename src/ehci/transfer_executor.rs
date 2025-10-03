@@ -3,10 +3,10 @@
 //! This module provides the critical glue between transfer manager APIs
 //! and actual EHCI Queue Head/Queue Transfer Descriptor programming.
 
-use crate::error::{Result, UsbError};
 use crate::dma::DmaBuffer;
-use crate::ehci::qh::{QueueHead, endpoint};
-use crate::ehci::qtd::{QueueTD, token};
+use crate::ehci::qh::{endpoint, QueueHead};
+use crate::ehci::qtd::{token, QueueTD};
+use crate::error::{Result, UsbError};
 use crate::transfer::Direction;
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -93,9 +93,7 @@ impl TransferExecutor {
     ///
     /// Caller must ensure op_base points to valid EHCI operational registers
     pub unsafe fn new(op_base: usize) -> Self {
-        Self {
-            op_base,
-        }
+        Self { op_base }
     }
 
     /// Allocate a QH from the pool
@@ -111,17 +109,17 @@ impl TransferExecutor {
             }
 
             let new_value = current | (1 << free_bit);
-            if QH_ALLOCATED.compare_exchange(
-                current,
-                new_value,
-                Ordering::AcqRel,
-                Ordering::Acquire
-            ).is_ok() {
+            if QH_ALLOCATED
+                .compare_exchange(current, new_value, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
                 // Reset the QH
                 unsafe {
                     QH_POOL[free_bit as usize] = QueueHead::new();
                 }
-                return Ok(QhHandle { index: free_bit as usize });
+                return Ok(QhHandle {
+                    index: free_bit as usize,
+                });
             }
         }
     }
@@ -149,17 +147,17 @@ impl TransferExecutor {
             }
 
             let new_value = current | (1 << free_bit);
-            if QTD_ALLOCATED.compare_exchange(
-                current,
-                new_value,
-                Ordering::AcqRel,
-                Ordering::Acquire
-            ).is_ok() {
+            if QTD_ALLOCATED
+                .compare_exchange(current, new_value, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
                 // Reset the qTD
                 unsafe {
                     QTD_POOL[free_bit as usize] = QueueTD::new();
                 }
-                return Ok(QtdHandle { index: free_bit as usize });
+                return Ok(QtdHandle {
+                    index: free_bit as usize,
+                });
             }
         }
     }
@@ -252,7 +250,7 @@ impl TransferExecutor {
                 0, // Control endpoint is always 0
                 max_packet_size,
                 endpoint::SPEED_HIGH, // Assume high-speed, adjust for hub devices
-                true, // is_control
+                true,                 // is_control
             )?;
         }
 
@@ -323,8 +321,7 @@ impl TransferExecutor {
             let status_qtd = self.get_qtd_mut(&status_qtd_handle)?;
             unsafe {
                 status_qtd.init_transfer(
-                    status_pid,
-                    true, // DATA1
+                    status_pid, true, // DATA1
                     None, // Zero-length packet
                     true, // Interrupt on complete
                 )?;
@@ -447,7 +444,8 @@ impl TransferExecutor {
         self.enable_async_schedule()?;
 
         // Wait for completion with timeout
-        let bytes_transferred = self.wait_for_completion_timeout(&qtd_handle, Some(buffer), timeout_ms)?;
+        let bytes_transferred =
+            self.wait_for_completion_timeout(&qtd_handle, Some(buffer), timeout_ms)?;
 
         // Clean up
         self.unlink_qh_from_async_schedule(&qh_handle)?;
@@ -534,7 +532,8 @@ impl TransferExecutor {
         }
 
         // Wait for completion (interrupt transfers are periodic, poll for completion)
-        let bytes_transferred = self.wait_for_completion_timeout(&qtd_handle, Some(buffer), 1000)?;
+        let bytes_transferred =
+            self.wait_for_completion_timeout(&qtd_handle, Some(buffer), 1000)?;
 
         // Clean up
         self.unlink_qh_from_periodic_schedule(&qh_handle, interval)?;
@@ -567,7 +566,11 @@ impl TransferExecutor {
     }
 
     /// Unlink QH from periodic schedule
-    fn unlink_qh_from_periodic_schedule(&mut self, qh_handle: &QhHandle, interval: u32) -> Result<()> {
+    fn unlink_qh_from_periodic_schedule(
+        &mut self,
+        qh_handle: &QhHandle,
+        interval: u32,
+    ) -> Result<()> {
         let frame_list = unsafe { super::periodic::get_frame_list() };
         let scheduler = super::periodic::get_scheduler();
 
@@ -590,9 +593,7 @@ impl TransferExecutor {
         let op_base = self.op_base;
 
         // Read current async list head
-        let asynclistaddr = unsafe {
-            core::ptr::read_volatile((op_base + 0x18) as *const u32)
-        };
+        let asynclistaddr = unsafe { core::ptr::read_volatile((op_base + 0x18) as *const u32) };
 
         // Update QH based on whether async schedule exists
         {
@@ -603,17 +604,15 @@ impl TransferExecutor {
                 qh.set_head_of_list();
                 qh.horizontal_link.store(
                     qh_addr | QueueHead::TYPE_QH, // Point to self
-                    Ordering::Release
+                    Ordering::Release,
                 );
             } else {
                 // Insert into existing circular list
                 let head_qh_addr = asynclistaddr & !0x1F;
 
                 // Link new QH to current head
-                qh.horizontal_link.store(
-                    head_qh_addr | QueueHead::TYPE_QH,
-                    Ordering::Release
-                );
+                qh.horizontal_link
+                    .store(head_qh_addr | QueueHead::TYPE_QH, Ordering::Release);
 
                 // Note: In production, should update previous QH to point to this one
                 // For simplicity, just prepending to list

@@ -3,14 +3,14 @@
 //! Simple bit-mask based allocation for USB descriptors and buffers
 
 use crate::error::{Result, UsbError};
-use core::ptr::NonNull;
 use core::cell::UnsafeCell;
+use core::ptr::NonNull;
 
 /// Simple USB memory pool with static allocation
 pub struct UsbMemoryPool {
-    qh_allocated: u32,      // 32 queue heads max
-    qtd_allocated: u32,     // 32 queue TDs max
-    buffer_allocated: u32,  // 32 buffers max
+    qh_allocated: u32,     // 32 queue heads max
+    qtd_allocated: u32,    // 32 queue TDs max
+    buffer_allocated: u32, // 32 buffers max
 }
 
 impl UsbMemoryPool {

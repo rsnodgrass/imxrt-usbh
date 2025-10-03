@@ -2,9 +2,9 @@
 //!
 //! Based on EHCI Specification Section 3.5
 
-use core::sync::atomic::{AtomicU32, Ordering};
-use crate::error::{Result, UsbError};
 use crate::dma::is_dma_aligned;
+use crate::error::{Result, UsbError};
+use core::sync::atomic::{AtomicU32, Ordering};
 
 /// qTD token field bit definitions
 #[allow(missing_docs)]
@@ -182,9 +182,7 @@ impl QueueTD {
         // Convert buffer reference to pointer for unsafe init_transfer
         let buffer_ptr = buffer.map(|b| (b.as_ptr(), b.len()));
 
-        unsafe {
-            self.init_transfer(pid, data_toggle, buffer_ptr, interrupt_on_complete)
-        }
+        unsafe { self.init_transfer(pid, data_toggle, buffer_ptr, interrupt_on_complete) }
     }
 
     /// Check if qTD is still active
@@ -331,17 +329,26 @@ mod tests {
         assert!(qtd.has_error().is_none());
 
         // Test halted with babble error
-        qtd.token.store(token::STATUS_HALTED | token::STATUS_BABBLE, Ordering::Relaxed);
+        qtd.token.store(
+            token::STATUS_HALTED | token::STATUS_BABBLE,
+            Ordering::Relaxed,
+        );
         assert!(matches!(qtd.has_error(), Some(UsbError::TransactionError)));
 
         // Test halted with buffer error
         qtd.reset();
-        qtd.token.store(token::STATUS_HALTED | token::STATUS_DATA_BUFFER_ERROR, Ordering::Relaxed);
+        qtd.token.store(
+            token::STATUS_HALTED | token::STATUS_DATA_BUFFER_ERROR,
+            Ordering::Relaxed,
+        );
         assert!(matches!(qtd.has_error(), Some(UsbError::BufferOverflow)));
 
         // Test halted with transaction error
         qtd.reset();
-        qtd.token.store(token::STATUS_HALTED | token::STATUS_TRANSACTION_ERROR, Ordering::Relaxed);
+        qtd.token.store(
+            token::STATUS_HALTED | token::STATUS_TRANSACTION_ERROR,
+            Ordering::Relaxed,
+        );
         assert!(matches!(qtd.has_error(), Some(UsbError::TransactionError)));
 
         // Test generic halt (stall)

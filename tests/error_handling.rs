@@ -10,15 +10,13 @@ mod common;
 
 use common::create_mock_buffer;
 use imxrt_usbh::transfer::{
-    BulkTransferManager, InterruptTransferManager, Direction,
-    BulkState, InterruptState,
+    BulkState, BulkTransferManager, Direction, InterruptState, InterruptTransferManager,
 };
 use imxrt_usbh::UsbError;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     /// Test timeout detection logic
     #[test]
@@ -48,25 +46,40 @@ mod tests {
         let mut mgr = InterruptTransferManager::<4>::new();
         let buf = create_mock_buffer(64, 0);
 
-        let idx = mgr.submit(Direction::In, 1, 0x81, 8, buf, 10, true).unwrap();
+        let idx = mgr
+            .submit(Direction::In, 1, 0x81, 8, buf, 10, true)
+            .unwrap();
         let transfer = mgr.get_transfer(idx).unwrap();
 
         // Initial NAK count is 0
-        assert_eq!(transfer.nak_count.load(core::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(
+            transfer
+                .nak_count
+                .load(core::sync::atomic::Ordering::Relaxed),
+            0
+        );
 
         // Simulate NAK responses
         for expected_count in 1..=3 {
-            transfer.nak_count.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            transfer
+                .nak_count
+                .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
             assert_eq!(
-                transfer.nak_count.load(core::sync::atomic::Ordering::Relaxed),
+                transfer
+                    .nak_count
+                    .load(core::sync::atomic::Ordering::Relaxed),
                 expected_count
             );
         }
 
         // max_naks is 3, threshold reached
-        assert_eq!(transfer.nak_count.load(core::sync::atomic::Ordering::Relaxed), transfer.max_naks);
+        assert_eq!(
+            transfer
+                .nak_count
+                .load(core::sync::atomic::Ordering::Relaxed),
+            transfer.max_naks
+        );
     }
-
 
     /// Test interrupt NAK timeout statistics
     #[test]
@@ -83,7 +96,6 @@ mod tests {
 
         assert_eq!(stats.nak_timeouts(), 2);
     }
-
 
     /// Test buffer overflow detection (size validation)
     #[test]
@@ -102,7 +114,6 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(result, Err(UsbError::InvalidParameter)));
     }
-
 }
 
 #[cfg(all(test, not(feature = "std")))]

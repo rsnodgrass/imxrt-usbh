@@ -2,8 +2,8 @@
 //!
 //! Implements the memory pool improvements from the expert review
 
+use crate::ehci::{QueueHead, QueueTD};
 use crate::error::{Result, UsbError};
-use crate::ehci::{QueueTD, QueueHead};
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -80,8 +80,16 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
 
     /// Get pool utilization statistics
     pub fn stats(&self) -> PoolStats {
-        let qh_used = self.qh_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
-        let qtd_used = self.qtd_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
+        let qh_used = self
+            .qh_allocated
+            .iter()
+            .filter(|a| a.load(Ordering::Relaxed))
+            .count();
+        let qtd_used = self
+            .qtd_allocated
+            .iter()
+            .filter(|a| a.load(Ordering::Relaxed))
+            .count();
 
         PoolStats {
             qh_total: N_QH,
@@ -220,8 +228,16 @@ impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE
 
     /// Get buffer pool statistics
     pub fn pool_stats(&self) -> DataBufferStats {
-        let small_used = self.small_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
-        let large_used = self.large_allocated.iter().filter(|a| a.load(Ordering::Relaxed)).count();
+        let small_used = self
+            .small_allocated
+            .iter()
+            .filter(|a| a.load(Ordering::Relaxed))
+            .count();
+        let large_used = self
+            .large_allocated
+            .iter()
+            .filter(|a| a.load(Ordering::Relaxed))
+            .count();
 
         DataBufferStats {
             small_total: N_SMALL,

@@ -1,9 +1,9 @@
 //! Safety monitoring and protection mechanisms
-//! 
+//!
 //! Provides stack overflow detection, bounds checking, and runtime safety validation
 
 use crate::error::{Result, UsbError};
-use core::sync::atomic::{AtomicU32, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// Stack monitoring for overflow detection
 pub struct StackMonitor {
@@ -21,9 +21,9 @@ pub struct StackMonitor {
 
 impl StackMonitor {
     /// Create new stack monitor
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// Caller must provide correct stack boundaries
     pub const unsafe fn new(stack_base: u32, stack_size: u32) -> Self {
         Self {
@@ -34,7 +34,7 @@ impl StackMonitor {
             guard_size: 256, // 256-byte guard region
         }
     }
-    
+
     /// Initialize stack canary pattern for detection
     pub unsafe fn init_canary(&self) {
         let stack_end = self.stack_base - self.stack_size;
@@ -59,34 +59,37 @@ impl StackMonitor {
             }
         }
     }
-    
+
     /// Check for stack overflow
     #[inline(always)]
     pub fn check_stack(&self) -> bool {
         let current_sp = cortex_m::register::msp::read() as u32;
         let stack_end = self.stack_base - self.stack_size;
-        
+
         // Check if we're in the guard region
         if current_sp <= stack_end + self.guard_size {
             self.overflow_detected.store(true, Ordering::Release);
-            
+
             #[cfg(feature = "defmt")]
-            defmt::error!("Stack overflow! SP={:#x}, limit={:#x}", 
-                         current_sp, stack_end + self.guard_size);
-            
+            defmt::error!(
+                "Stack overflow! SP={:#x}, limit={:#x}",
+                current_sp,
+                stack_end + self.guard_size
+            );
+
             return true;
         }
-        
+
         // Update high water mark
         let stack_used = self.stack_base - current_sp;
         let current_high = self.high_water_mark.load(Ordering::Relaxed);
         if stack_used > current_high {
             self.high_water_mark.store(stack_used, Ordering::Relaxed);
         }
-        
+
         false
     }
-    
+
     /// Get stack usage statistics
     pub fn get_usage(&self) -> StackUsage {
         StackUsage {
@@ -96,14 +99,14 @@ impl StackMonitor {
             overflow_detected: self.overflow_detected.load(Ordering::Relaxed),
         }
     }
-    
+
     /// Check canary values for corruption
     pub unsafe fn verify_canary(&self) -> bool {
         let stack_end = self.stack_base - self.stack_size;
         let canary_start = stack_end as *const u32;
         let canary_end = (stack_end + self.guard_size) as *const u32;
         let canary_pattern = 0xDEADBEEF;
-        
+
         unsafe {
             let mut ptr = canary_start;
             while ptr < canary_end {
@@ -138,7 +141,7 @@ impl StackUsage {
     pub fn usage_percent(&self) -> u8 {
         ((self.high_water_mark as u64 * 100) / self.total_size as u64) as u8
     }
-    
+
     /// Check if stack usage is critical (>75%)
     pub fn is_critical(&self) -> bool {
         self.usage_percent() > 75
@@ -154,18 +157,18 @@ impl BoundsChecker {
         if ptr.is_null() {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         let addr = ptr as usize;
-        
+
         // Check for address overflow
         if addr.checked_add(len).is_none() {
             return Err(UsbError::BufferOverflow);
         }
-        
+
         // Additional validation can be added here
         Ok(())
     }
-    
+
     /// Validate DMA buffer is in correct region
     pub fn validate_dma_buffer(addr: usize, _len: usize) -> Result<()> {
         // For now, just validate alignment and non-null
@@ -173,27 +176,27 @@ impl BoundsChecker {
         if addr == 0 {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         // Check alignment
         if addr & (crate::dma::DMA_ALIGNMENT - 1) != 0 {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate alignment requirements
     pub fn validate_alignment(addr: usize, alignment: usize) -> Result<()> {
         // Check alignment is power of 2
         if alignment == 0 || (alignment & (alignment - 1)) != 0 {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         // Check address alignment
         if addr & (alignment - 1) != 0 {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         Ok(())
     }
 }
@@ -212,24 +215,26 @@ impl TimedCriticalSection {
             max_cycles: max_duration_us * 600, // 600MHz CPU
         }
     }
-    
+
     /// Execute function in critical section with timeout
     pub fn execute<F, R>(&self, f: F) -> Result<R>
     where
         F: FnOnce() -> R,
     {
         let result = cortex_m::interrupt::free(|_| f());
-        
-        let elapsed = cortex_m::peripheral::DWT::cycle_count()
-            .wrapping_sub(self.start_cycles);
-        
+
+        let elapsed = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(self.start_cycles);
+
         if elapsed > self.max_cycles {
             #[cfg(feature = "defmt")]
-            defmt::error!("Critical section timeout: {} cycles (max {})", 
-                         elapsed, self.max_cycles);
+            defmt::error!(
+                "Critical section timeout: {} cycles (max {})",
+                elapsed,
+                self.max_cycles
+            );
             return Err(UsbError::Timeout);
         }
-        
+
         Ok(result)
     }
 }
@@ -250,33 +255,35 @@ impl DeadlineMonitor {
             missed_deadlines: AtomicU32::new(0),
         }
     }
-    
+
     /// Check if deadline was met
     pub fn check_deadline(&self) -> bool {
-        let elapsed = cortex_m::peripheral::DWT::cycle_count()
-            .wrapping_sub(self.start_cycles);
-        
+        let elapsed = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(self.start_cycles);
+
         if elapsed > self.deadline_cycles {
             self.missed_deadlines.fetch_add(1, Ordering::Relaxed);
-            
+
             #[cfg(feature = "defmt")]
-            defmt::warn!("Deadline missed: {}us > {}us", 
-                        elapsed / 600, self.deadline_cycles / 600);
-            
+            defmt::warn!(
+                "Deadline missed: {}us > {}us",
+                elapsed / 600,
+                self.deadline_cycles / 600
+            );
+
             false
         } else {
             true
         }
     }
-    
+
     /// Get number of missed deadlines
     pub fn missed_count(&self) -> u32 {
         self.missed_deadlines.load(Ordering::Relaxed)
     }
 }
 
-use critical_section::Mutex;
 use core::cell::RefCell;
+use critical_section::Mutex;
 
 /// Global stack monitor instance protected by critical section
 ///
@@ -307,8 +314,11 @@ pub unsafe fn init_safety_monitoring(stack_base: u32, stack_size: u32) {
     peripherals.DWT.enable_cycle_counter();
 
     #[cfg(feature = "defmt")]
-    defmt::info!("Safety monitoring initialized: stack {:#x}..{:#x}",
-                 stack_base - stack_size, stack_base);
+    defmt::info!(
+        "Safety monitoring initialized: stack {:#x}..{:#x}",
+        stack_base - stack_size,
+        stack_base
+    );
 }
 
 /// Check all safety monitors

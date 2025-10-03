@@ -1,8 +1,8 @@
 //! USB Control transfer state machine implementation
 
+use crate::dma::{DescriptorAllocator, QhHandle, QtdHandle};
 use crate::error::{Result, UsbError};
-use crate::dma::{QhHandle, QtdHandle, DescriptorAllocator};
-use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 /// USB Setup packet per USB 2.0 specification
 #[repr(C, packed)]
@@ -23,7 +23,12 @@ pub struct SetupPacket {
 
 impl SetupPacket {
     /// Standard GET_DESCRIPTOR request
-    pub const fn get_descriptor(desc_type: u8, desc_index: u8, language_id: u16, length: u16) -> Self {
+    pub const fn get_descriptor(
+        desc_type: u8,
+        desc_index: u8,
+        language_id: u16,
+        length: u16,
+    ) -> Self {
         Self {
             bmRequestType: 0x80, // Device-to-host, standard, device
             bRequest: 0x06,      // GET_DESCRIPTOR
@@ -32,7 +37,7 @@ impl SetupPacket {
             wLength: length,
         }
     }
-    
+
     /// Standard SET_ADDRESS request
     pub const fn set_address(address: u8) -> Self {
         Self {
@@ -43,7 +48,7 @@ impl SetupPacket {
             wLength: 0,
         }
     }
-    
+
     /// Standard SET_CONFIGURATION request
     pub const fn set_configuration(config_value: u8) -> Self {
         Self {
@@ -54,7 +59,7 @@ impl SetupPacket {
             wLength: 0,
         }
     }
-    
+
     /// Standard CLEAR_FEATURE request for endpoint halt
     pub const fn clear_halt(endpoint: u8) -> Self {
         Self {
@@ -133,7 +138,7 @@ impl ControlTransfer {
         } else {
             0
         };
-        
+
         Self {
             state: AtomicU8::new(ControlState::Idle as u8),
             setup_packet,
@@ -150,7 +155,7 @@ impl ControlTransfer {
             data_toggle: AtomicU8::new(0),
         }
     }
-    
+
     /// Get current state
     pub fn state(&self) -> ControlState {
         match self.state.load(Ordering::Acquire) {
@@ -164,12 +169,12 @@ impl ControlTransfer {
             _ => ControlState::Failed,
         }
     }
-    
+
     /// Transition to new state
     fn transition_state(&self, new_state: ControlState) {
         self.state.store(new_state as u8, Ordering::Release);
     }
-    
+
     /// Start control transfer
     pub fn start<const N_QH: usize, const N_QTD: usize>(
         &mut self,
@@ -178,18 +183,18 @@ impl ControlTransfer {
         if self.state() != ControlState::Idle {
             return Err(UsbError::InvalidState);
         }
-        
+
         // Allocate queue head for control transfer
         let qh_handle = allocator.alloc_qh()?;
         self.qh_handle = Some(qh_handle);
-        
+
         // Start with SETUP stage
         self.transition_state(ControlState::Setup);
         self.execute_setup_stage(allocator)?;
-        
+
         Ok(())
     }
-    
+
     /// Execute SETUP stage
     fn execute_setup_stage<const N_QH: usize, const N_QTD: usize>(
         &mut self,
@@ -198,17 +203,17 @@ impl ControlTransfer {
         // Allocate qTD for SETUP packet
         let qtd_handle = allocator.alloc_qtd()?;
         self.qtd_handle = Some(qtd_handle);
-        
+
         // Configure qTD for SETUP packet
         // This would normally interact with the actual hardware descriptors
         // For now, we're setting up the state machine
-        
+
         // SETUP always uses DATA0
         self.data_toggle.store(0, Ordering::Release);
-        
+
         Ok(())
     }
-    
+
     /// Process transfer completion from interrupt handler
     pub fn process_completion<const N_QH: usize, const N_QTD: usize>(
         &mut self,
@@ -216,10 +221,11 @@ impl ControlTransfer {
         status: u32,
     ) -> Result<()> {
         // Check for errors in status
-        if status & 0x7C != 0 { // Error bits
+        if status & 0x7C != 0 {
+            // Error bits
             return self.handle_error(allocator, status);
         }
-        
+
         match self.state() {
             ControlState::Setup => {
                 // SETUP complete, move to DATA or STATUS stage
@@ -242,12 +248,13 @@ impl ControlTransfer {
             ControlState::DataIn => {
                 // Update bytes transferred
                 let bytes_in_qtd = self.get_bytes_from_qtd(status);
-                self.bytes_transferred.fetch_add(bytes_in_qtd, Ordering::AcqRel);
-                
+                self.bytes_transferred
+                    .fetch_add(bytes_in_qtd, Ordering::AcqRel);
+
                 // Toggle data bit for next transfer
                 let toggle = self.data_toggle.load(Ordering::Acquire);
                 self.data_toggle.store(1 - toggle, Ordering::Release);
-                
+
                 if self.bytes_transferred.load(Ordering::Acquire) >= self.total_bytes {
                     // All data received, move to STATUS
                     self.transition_state(ControlState::Status);
@@ -260,12 +267,13 @@ impl ControlTransfer {
             ControlState::DataOut => {
                 // Update bytes transferred
                 let bytes_out = self.get_bytes_from_qtd(status);
-                self.bytes_transferred.fetch_add(bytes_out, Ordering::AcqRel);
-                
+                self.bytes_transferred
+                    .fetch_add(bytes_out, Ordering::AcqRel);
+
                 // Toggle data bit for next transfer
                 let toggle = self.data_toggle.load(Ordering::Acquire);
                 self.data_toggle.store(1 - toggle, Ordering::Release);
-                
+
                 if self.bytes_transferred.load(Ordering::Acquire) >= self.total_bytes {
                     // All data sent, move to STATUS
                     self.transition_state(ControlState::Status);
@@ -284,10 +292,10 @@ impl ControlTransfer {
                 return Err(UsbError::InvalidState);
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Execute DATA IN stage
     fn execute_data_in_stage<const N_QH: usize, const N_QTD: usize>(
         &mut self,
@@ -297,22 +305,22 @@ impl ControlTransfer {
         if let Some(qtd) = self.qtd_handle.take() {
             allocator.free_qtd(qtd)?;
         }
-        
+
         // Allocate new qTD for DATA IN
         let qtd_handle = allocator.alloc_qtd()?;
         self.qtd_handle = Some(qtd_handle);
-        
+
         // Calculate transfer size for this qTD
         let remaining = self.total_bytes - self.bytes_transferred.load(Ordering::Acquire);
         let _transfer_size = remaining.min(self.max_packet_size as u32);
-        
+
         // Configure qTD for DATA IN with current toggle bit
         let _toggle = self.data_toggle.load(Ordering::Acquire);
         // Hardware configuration would happen here
-        
+
         Ok(())
     }
-    
+
     /// Execute DATA OUT stage
     fn execute_data_out_stage<const N_QH: usize, const N_QTD: usize>(
         &mut self,
@@ -322,22 +330,22 @@ impl ControlTransfer {
         if let Some(qtd) = self.qtd_handle.take() {
             allocator.free_qtd(qtd)?;
         }
-        
+
         // Allocate new qTD for DATA OUT
         let qtd_handle = allocator.alloc_qtd()?;
         self.qtd_handle = Some(qtd_handle);
-        
+
         // Calculate transfer size for this qTD
         let remaining = self.total_bytes - self.bytes_transferred.load(Ordering::Acquire);
         let _transfer_size = remaining.min(self.max_packet_size as u32);
-        
+
         // Configure qTD for DATA OUT with current toggle bit
         let _toggle = self.data_toggle.load(Ordering::Acquire);
         // Hardware configuration would happen here
-        
+
         Ok(())
     }
-    
+
     /// Execute STATUS stage
     fn execute_status_stage<const N_QH: usize, const N_QTD: usize>(
         &mut self,
@@ -347,20 +355,20 @@ impl ControlTransfer {
         if let Some(qtd) = self.qtd_handle.take() {
             allocator.free_qtd(qtd)?;
         }
-        
+
         // Allocate qTD for STATUS
         let qtd_handle = allocator.alloc_qtd()?;
         self.qtd_handle = Some(qtd_handle);
-        
+
         // STATUS stage always uses DATA1
         self.data_toggle.store(1, Ordering::Release);
-        
+
         // Direction is opposite of data stage
         // Zero-length packet for handshake
-        
+
         Ok(())
     }
-    
+
     /// Handle transfer error
     fn handle_error<const N_QH: usize, const N_QTD: usize>(
         &mut self,
@@ -368,12 +376,12 @@ impl ControlTransfer {
         status: u32,
     ) -> Result<()> {
         let retry_count = self.retry_count.fetch_add(1, Ordering::AcqRel);
-        
+
         if retry_count >= self.max_retries {
             // Max retries exceeded, fail transfer
             self.transition_state(ControlState::Failed);
             self.cleanup(allocator)?;
-            
+
             // Determine specific error from status
             if status & (1 << 6) != 0 {
                 return Err(UsbError::Stall);
@@ -387,7 +395,7 @@ impl ControlTransfer {
                 return Err(UsbError::TransactionError);
             }
         }
-        
+
         // Retry current stage
         match self.state() {
             ControlState::Setup => self.execute_setup_stage(allocator)?,
@@ -396,10 +404,10 @@ impl ControlTransfer {
             ControlState::Status => self.execute_status_stage(allocator)?,
             _ => return Err(UsbError::InvalidState),
         }
-        
+
         Ok(())
     }
-    
+
     /// Clean up resources
     fn cleanup<const N_QH: usize, const N_QTD: usize>(
         &mut self,
@@ -409,15 +417,15 @@ impl ControlTransfer {
         if let Some(qtd) = self.qtd_handle.take() {
             allocator.free_qtd(qtd)?;
         }
-        
+
         // Free queue head
         if let Some(qh) = self.qh_handle.take() {
             allocator.free_qh(qh)?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Get bytes transferred from qTD status
     fn get_bytes_from_qtd(&self, status: u32) -> u32 {
         // Extract bytes from qTD token field
@@ -428,17 +436,17 @@ impl ControlTransfer {
         // For now, return a placeholder
         0
     }
-    
+
     /// Check if transfer is complete
     pub fn is_complete(&self) -> bool {
         self.state() == ControlState::Complete
     }
-    
+
     /// Check if transfer failed
     pub fn is_failed(&self) -> bool {
         self.state() == ControlState::Failed
     }
-    
+
     /// Get bytes transferred
     pub fn bytes_transferred(&self) -> u32 {
         self.bytes_transferred.load(Ordering::Acquire)
@@ -462,7 +470,7 @@ impl<const MAX_TRANSFERS: usize> ControlTransferManager<MAX_TRANSFERS> {
             stats: TransferStats::new(),
         }
     }
-    
+
     /// Submit new control transfer
     pub fn submit(
         &mut self,
@@ -485,10 +493,10 @@ impl<const MAX_TRANSFERS: usize> ControlTransferManager<MAX_TRANSFERS> {
                 return Ok(index);
             }
         }
-        
+
         Err(UsbError::NoResources)
     }
-    
+
     /// Process completion for a transfer
     pub fn process_completion<const N_QH: usize, const N_QTD: usize>(
         &mut self,
@@ -499,10 +507,10 @@ impl<const MAX_TRANSFERS: usize> ControlTransferManager<MAX_TRANSFERS> {
         if index >= MAX_TRANSFERS {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         if let Some(transfer) = &mut self.transfers[index] {
             transfer.process_completion(allocator, status)?;
-            
+
             if transfer.is_complete() {
                 self.stats.record_completion();
                 self.transfers[index] = None;
@@ -511,10 +519,10 @@ impl<const MAX_TRANSFERS: usize> ControlTransferManager<MAX_TRANSFERS> {
                 self.transfers[index] = None;
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get transfer statistics
     pub fn statistics(&self) -> &TransferStats {
         &self.stats
@@ -536,24 +544,24 @@ impl TransferStats {
             failures: AtomicU32::new(0),
         }
     }
-    
+
     fn record_submission(&self) {
         self.submissions.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_completion(&self) {
         self.completions.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_failure(&self) {
         self.failures.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     /// Get success rate
     pub fn success_rate(&self) -> f32 {
         let completions = self.completions.load(Ordering::Relaxed) as f32;
-        let total = (self.completions.load(Ordering::Relaxed) + 
-                     self.failures.load(Ordering::Relaxed)) as f32;
+        let total = (self.completions.load(Ordering::Relaxed)
+            + self.failures.load(Ordering::Relaxed)) as f32;
         if total > 0.0 {
             completions / total
         } else {

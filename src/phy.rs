@@ -3,19 +3,19 @@
 //! Based on i.MX RT1060 Reference Manual sections 14.4-14.5 and 66.5
 //! Implements embedded systems best practices for hardware timing and error recovery
 
-use crate::error::{Result, UsbError};
 use crate::ehci::RegisterTimeout;
+use crate::error::{Result, UsbError};
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 // TODO: Fix RAL API usage after determining correct register names
 // use imxrt_ral as ral;
 
 /// USB1 PLL configuration constants per RM 14.5.1
-const USB1_PLL_DIV_SELECT: u32 = 20;  // 480MHz from 24MHz OSC
+const USB1_PLL_DIV_SELECT: u32 = 20; // 480MHz from 24MHz OSC
 const USB1_PLL_ENABLE: u32 = 1 << 13;
 const USB1_PLL_POWER: u32 = 1 << 12;
 const USB1_PLL_EN_USB_CLKS: u32 = 1 << 6;
 const USB1_PLL_LOCK: u32 = 1 << 31;
-const USB1_PLL_BYPASS: u32 = 1 << 16;  // Bypass bit per RM 14.5.3
+const USB1_PLL_BYPASS: u32 = 1 << 16; // Bypass bit per RM 14.5.3
 
 /// Hardware timing constants per i.MX RT reference manual
 mod timing {
@@ -33,12 +33,12 @@ mod timing {
 
 /// USBPHY register offsets per RM 66.6
 #[allow(dead_code)]
-const USBPHY_PWD_OFFSET: usize = 0x00;     // Power-Down register
+const USBPHY_PWD_OFFSET: usize = 0x00; // Power-Down register
 #[allow(dead_code)]
-const USBPHY_TX_OFFSET: usize = 0x10;      // TX register
+const USBPHY_TX_OFFSET: usize = 0x10; // TX register
 #[allow(dead_code)]
-const USBPHY_RX_OFFSET: usize = 0x20;      // RX register
-const USBPHY_CTRL_OFFSET: usize = 0x30;    // Control register
+const USBPHY_RX_OFFSET: usize = 0x20; // RX register
+const USBPHY_CTRL_OFFSET: usize = 0x30; // Control register
 #[allow(dead_code)]
 const USBPHY_CTRL_SET_OFFSET: usize = 0x34;
 #[allow(dead_code)]
@@ -164,15 +164,15 @@ impl UsbPhy {
 
         // Step 2: Wait for PLL lock with timeout (RM 14.5.3)
         let timeout = RegisterTimeout::new_us(timing::PLL_LOCK_TIMEOUT_US);
-        timeout.wait_for(|| {
-            unsafe {
+        timeout
+            .wait_for(|| unsafe {
                 let pll_reg = (self.ccm_base + 0x10) as *const u32;
                 cortex_m::asm::dmb();
                 let pll = core::ptr::read_volatile(pll_reg);
                 cortex_m::asm::dmb();
                 (pll & USB1_PLL_LOCK) != 0
-            }
-        }).map_err(|_| UsbError::HardwareFailure)?;
+            })
+            .map_err(|_| UsbError::HardwareFailure)?;
 
         // Step 3: Clear bypass after lock confirmed (RM requirement)
         unsafe {
@@ -255,15 +255,17 @@ impl UsbPhy {
 
         // Wait for calibration completion
         let timeout = RegisterTimeout::new_us(timing::PHY_CALIBRATION_TIMEOUT_US);
-        timeout.wait_for(|| {
-            unsafe {
-                let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
-                cortex_m::asm::dmb();
-                let ctrl = core::ptr::read_volatile(ctrl_reg);
-                cortex_m::asm::dmb();
-                (ctrl & (1 << 17)) != 0 // Calibration done
-            }
-        }).map_err(|_| UsbError::HardwareFailure)?;
+        timeout
+            .wait_for(|| {
+                unsafe {
+                    let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
+                    cortex_m::asm::dmb();
+                    let ctrl = core::ptr::read_volatile(ctrl_reg);
+                    cortex_m::asm::dmb();
+                    (ctrl & (1 << 17)) != 0 // Calibration done
+                }
+            })
+            .map_err(|_| UsbError::HardwareFailure)?;
 
         self.calibrated.store(true, Ordering::Release);
         Ok(())

@@ -52,13 +52,13 @@ impl Default for HilConfig {
 /// Initialize HIL test environment
 pub fn init_hil_test() -> Result<UsbHost> {
     println!("Initializing HIL test environment...");
-    
+
     // Initialize USB host
     let host = unsafe { UsbHost::new() }?;
-    
+
     // Wait for hardware initialization
     std::thread::sleep(Duration::from_millis(100));
-    
+
     println!("HIL test environment ready");
     Ok(host)
 }
@@ -66,16 +66,16 @@ pub fn init_hil_test() -> Result<UsbHost> {
 /// Wait for device connection with timeout
 pub fn wait_for_device_connection(timeout: Duration) -> Result<bool> {
     let start = std::time::Instant::now();
-    
+
     loop {
         // Check for device connection (would check actual port status)
         // This is a placeholder for actual hardware checking
         if start.elapsed() > timeout {
             return Ok(false);
         }
-        
+
         std::thread::sleep(Duration::from_millis(100));
-        
+
         // Simulate device detection logic
         if start.elapsed() > Duration::from_millis(500) {
             return Ok(true);
@@ -85,7 +85,7 @@ pub fn wait_for_device_connection(timeout: Duration) -> Result<bool> {
 
 /// Verify device matches expected specification
 pub fn verify_device_spec(device: &TestDevice, actual_vid: u16, actual_pid: u16, actual_class: u8) -> bool {
-    device.vendor_id == actual_vid && 
-    device.product_id == actual_pid && 
+    device.vendor_id == actual_vid &&
+    device.product_id == actual_pid &&
     device.device_class == actual_class
 }

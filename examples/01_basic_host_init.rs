@@ -29,8 +29,8 @@
 #![no_main]
 #![no_std]
 
-use teensy4_bsp as bsp;
 use bsp::board;
+use teensy4_bsp as bsp;
 use teensy4_panic as _;
 
 use imxrt_usbh::phy::UsbPhy;
@@ -49,10 +49,7 @@ fn main() -> ! {
     let led = board::led(&mut gpio2, pins.p13);
 
     // Set up USB CDC logging on USB1 (micro USB port)
-    let mut poller = imxrt_log::log::usbd(
-        usb,
-        imxrt_log::Interrupts::Enabled,
-    ).unwrap();
+    let mut poller = imxrt_log::log::usbd(usb, imxrt_log::Interrupts::Enabled).unwrap();
 
     info!("\r\n=== USB Host Example 01: PHY Initialization ===");
     info!("Initializing USB PHY...");
@@ -97,7 +94,7 @@ fn main() -> ! {
                     poller.poll();
                 }
             }
-        },
+        }
         Err(_) => {
             info!("✗ USB PHY initialization FAILED!");
             info!("LED blinking rapidly to indicate error.");

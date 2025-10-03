@@ -12,7 +12,16 @@
       "Bash(git add:*)",
       "Read(//Users/ryan/Sync/Code/acertain/**)",
       "Read(//Users/ryan/**)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(rust-size:*)",
+      "Bash(rust-nm:*)",
+      "WebSearch",
+      "Bash(rust-objdump:*)",
+      "Bash(cat:*)",
+      "Bash(cargo metadata:*)",
+      "Bash(rust-objcopy:*)",
+      "Bash(git mv:*)",
+      "Bash(cargo objcopy:*)"
     ],
     "deny": [],
     "ask": []

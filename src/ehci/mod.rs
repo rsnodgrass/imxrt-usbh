@@ -1,7 +1,7 @@
 //! Enhanced Host Controller Interface (EHCI) for i.MX RT1062
 //!
-//! This module provides comprehensive EHCI support for USB 2.0 host operations on the 
-//! i.MX RT1062 microcontroller. EHCI is the standard interface that enables high-speed 
+//! This module provides comprehensive EHCI support for USB 2.0 host operations on the
+//! i.MX RT1062 microcontroller. EHCI is the standard interface that enables high-speed
 //! USB communications and serves as the foundation for all USB host functionality.
 //!
 //! # What is EHCI?
@@ -25,7 +25,7 @@
 //! - **Best-effort**: No bandwidth guarantees, executes when bus is available
 //! - **Reliable**: Automatic retry on errors until success or timeout
 //!
-//! ### Periodic Schedule (Interrupt & Isochronous) 
+//! ### Periodic Schedule (Interrupt & Isochronous)
 //! - **Frame-based**: Uses 1024-entry frame list for precise timing
 //! - **Bandwidth guaranteed**: Reserved bus time for time-critical transfers
 //! - **Real-time**: Fixed intervals for audio/video streaming
@@ -56,7 +56,7 @@
 //!
 //! ```text
 //! 1. Start-Split (SSPLIT):  Host → Hub (initiate FS/LS transfer)
-//! 2. FS/LS Communication:   Hub ↔ Device (at device's native speed)  
+//! 2. FS/LS Communication:   Hub ↔ Device (at device's native speed)
 //! 3. Complete-Split (CSPLIT): Host ← Hub (retrieve transfer results)
 //! ```
 //!
@@ -66,7 +66,7 @@
 //!
 //! ```rust
 //! use imxrt_usbh::ehci::{EhciController, UsbCmd};
-//! 
+//!
 //! // Initialize EHCI controller
 //! let mut ehci = unsafe { EhciController::new() }?;
 //!
@@ -125,7 +125,7 @@
 //! ```rust
 //! // Clean cache before hardware access
 //! dma_buffer.clean_cache();
-//! 
+//!
 //! // Invalidate cache after hardware updates
 //! dma_buffer.invalidate_cache();
 //! ```
@@ -141,7 +141,7 @@
 //!
 //! Error recovery is typically handled through:
 //! 1. Automatic retry (for transient errors)
-//! 2. Endpoint reset (for persistent errors)  
+//! 2. Endpoint reset (for persistent errors)
 //! 3. Port reset (for device-level errors)
 //! 4. Controller reset (for system-level errors)
 //!
@@ -192,19 +192,27 @@
 //! - Capability Registers (read-only, offset 0x000-0x00F)
 //! - Operational Registers (read-write, offset varies by CAPLENGTH)
 
-pub mod register;
-pub mod qtd;
-pub mod qh;
 pub mod controller;
+pub mod error_recovery;
+pub mod itd;
+pub mod periodic;
+pub mod qh;
+pub mod qtd;
+pub mod register;
+pub mod transfer_executor;
 
-pub use qtd::QueueTD;
+pub use controller::{EhciController, EhciControllerBuilder, Initialized, Running, Uninitialized};
+pub use error_recovery::{ErrorRecovery, ErrorType, RecoveryAction, RecoveryStats};
+pub use itd::IsocTransferDescriptor;
+pub use periodic::{InterruptScheduler, PeriodicFrameList, FRAME_LIST_SIZE};
 pub use qh::QueueHead;
+pub use qtd::QueueTD;
 pub use register::{Register, RegisterTimeout};
-pub use controller::{EhciController, EhciControllerBuilder, Uninitialized, Initialized, Running};
+pub use transfer_executor::TransferExecutor;
 
 // Re-export important types for easier use
+pub use qh::{capabilities, endpoint};
 pub use qtd::token;
-pub use qh::{endpoint, capabilities};
 
 use crate::error::{Result, UsbError};
 use bitflags::bitflags;
@@ -222,13 +230,13 @@ impl PortId {
             Ok(Self(port))
         }
     }
-    
+
     /// Get the port index as usize for array access
     #[inline(always)]
     pub const fn index(self) -> usize {
         self.0 as usize
     }
-    
+
     /// Get the raw port number
     #[inline(always)]
     pub const fn value(self) -> u8 {
@@ -244,7 +252,7 @@ impl From<u8> for PortId {
 
 impl TryFrom<usize> for PortId {
     type Error = UsbError;
-    
+
     fn try_from(port: usize) -> Result<Self> {
         if port >= 8 {
             Err(UsbError::InvalidParameter)
@@ -269,14 +277,13 @@ pub const USB1_BASE: usize = 0x402E_0000;
 /// Per i.MX RT1060 Reference Manual Section 2.1.2: USB OTG2 base is 0x402E_0200
 pub const USB2_BASE: usize = 0x402E_0200;
 
-
 /// Port speed detection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum PortSpeed {
-    FullSpeed,   // 12 Mbps
-    LowSpeed,    // 1.5 Mbps
-    HighSpeed,   // 480 Mbps
+    FullSpeed, // 12 Mbps
+    LowSpeed,  // 1.5 Mbps
+    HighSpeed, // 480 Mbps
     Unknown,
 }
 
@@ -284,10 +291,10 @@ pub enum PortSpeed {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum LineState {
-    SE0,      // Single-ended zero
-    JState,   // J-state
-    KState,   // K-state
-    SE1,      // Single-ended one (invalid)
+    SE0,    // Single-ended zero
+    JState, // J-state
+    KState, // K-state
+    SE1,    // Single-ended one (invalid)
 }
 
 /// EHCI Capability Registers

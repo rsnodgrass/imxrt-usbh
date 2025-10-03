@@ -1,12 +1,12 @@
 //! Error recovery and fault tolerance mechanisms
-//! 
+//!
 //! Implements comprehensive error recovery strategies for USB host operation
 
+use crate::ehci::controller::EhciController;
 use crate::error::{Result, UsbError};
 use crate::phy::UsbPhy;
-use crate::ehci::controller::EhciController;
 use crate::vbus::VbusPowerControl;
-use core::sync::atomic::{AtomicU32, AtomicU8, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
 /// Recovery strategy for different error types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,51 +69,41 @@ impl RecoveryCoordinator {
             recovering: AtomicBool::new(false),
         }
     }
-    
+
     /// Determine recovery strategy for an error
     pub fn analyze_error(&mut self, error: &UsbError) -> RecoveryStrategy {
         self.state = RecoveryState::Analyzing;
         self.stats.record_error(error);
-        
+
         match error {
             // Transient errors - retry immediately
-            UsbError::Nak => {
-                RecoveryStrategy::RetryImmediate
-            }
-            
+            UsbError::Nak => RecoveryStrategy::RetryImmediate,
+
             // Timing errors - retry with backoff
             UsbError::Timeout => {
                 let delay = self.calculate_backoff();
                 RecoveryStrategy::RetryWithBackoff { delay_ms: delay }
             }
-            
+
             // Endpoint errors - reset endpoint
-            UsbError::Stall => {
-                RecoveryStrategy::ResetEndpoint
-            }
-            
+            UsbError::Stall => RecoveryStrategy::ResetEndpoint,
+
             // Transaction errors - reset device
-            UsbError::TransactionError => {
-                RecoveryStrategy::ResetDevice
-            }
-            
+            UsbError::TransactionError => RecoveryStrategy::ResetDevice,
+
             // Port errors - reset port
-            UsbError::DeviceDisconnected | UsbError::PortError => {
-                RecoveryStrategy::ResetPort
-            }
-            
+            UsbError::DeviceDisconnected | UsbError::PortError => RecoveryStrategy::ResetPort,
+
             // Controller/hardware errors - reset controller
-            UsbError::HardwareFailure => {
-                RecoveryStrategy::ResetController
-            }
-            
+            UsbError::HardwareFailure => RecoveryStrategy::ResetController,
+
             // Fatal errors - cannot recover
-            UsbError::InvalidParameter | UsbError::InvalidState | 
-            UsbError::InvalidDescriptor | UsbError::Unsupported |
-            UsbError::AlreadyInitialized => {
-                RecoveryStrategy::Fatal
-            }
-            
+            UsbError::InvalidParameter
+            | UsbError::InvalidState
+            | UsbError::InvalidDescriptor
+            | UsbError::Unsupported
+            | UsbError::AlreadyInitialized => RecoveryStrategy::Fatal,
+
             // Buffer errors - depends on frequency
             UsbError::BufferOverflow | UsbError::NoResources => {
                 if self.stats.is_recurring_error(error) {
@@ -124,7 +114,7 @@ impl RecoveryCoordinator {
             }
         }
     }
-    
+
     /// Execute recovery strategy
     pub fn execute_recovery(
         &mut self,
@@ -137,50 +127,40 @@ impl RecoveryCoordinator {
         if self.recovering.swap(true, Ordering::AcqRel) {
             return Err(UsbError::InvalidState);
         }
-        
+
         self.state = RecoveryState::Recovering;
-        
+
         let result = match strategy {
             RecoveryStrategy::RetryImmediate => {
                 self.stats.record_retry();
                 Ok(()) // Caller will retry
             }
-            
+
             RecoveryStrategy::RetryWithBackoff { delay_ms } => {
                 self.delay_ms(delay_ms);
                 self.stats.record_retry();
                 Ok(()) // Caller will retry
             }
-            
-            RecoveryStrategy::ResetEndpoint => {
-                self.reset_endpoint(controller)
-            }
-            
-            RecoveryStrategy::ResetDevice => {
-                self.reset_device(controller)
-            }
-            
-            RecoveryStrategy::ResetPort => {
-                self.reset_port(controller)
-            }
-            
-            RecoveryStrategy::ResetController => {
-                self.reset_controller(phy, controller)
-            }
-            
-            RecoveryStrategy::PowerCycle => {
-                self.power_cycle(vbus)
-            }
-            
+
+            RecoveryStrategy::ResetEndpoint => self.reset_endpoint(controller),
+
+            RecoveryStrategy::ResetDevice => self.reset_device(controller),
+
+            RecoveryStrategy::ResetPort => self.reset_port(controller),
+
+            RecoveryStrategy::ResetController => self.reset_controller(phy, controller),
+
+            RecoveryStrategy::PowerCycle => self.power_cycle(vbus),
+
             RecoveryStrategy::Fatal => {
                 self.state = RecoveryState::Failed;
                 Err(UsbError::HardwareFailure)
             }
         };
-        
+
         // Clear recovering flag
         self.recovering.store(false, Ordering::Release);
-        
+
         // Update state based on result
         match result {
             Ok(()) => {
@@ -196,70 +176,70 @@ impl RecoveryCoordinator {
                 }
             }
         }
-        
+
         result
     }
-    
+
     /// Reset endpoint
     fn reset_endpoint(&mut self, controller: Option<&mut EhciController<8>>) -> Result<()> {
         if controller.is_none() {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         // Send CLEAR_HALT to endpoint
         // This would interact with the control transfer mechanism
-        
+
         #[cfg(feature = "defmt")]
         defmt::info!("Resetting endpoint");
-        
+
         Ok(())
     }
-    
+
     /// Reset device
     fn reset_device(&mut self, controller: Option<&mut EhciController<8>>) -> Result<()> {
         if controller.is_none() {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         // Send SET_FEATURE(DEVICE_RESET) or re-enumerate
-        
+
         #[cfg(feature = "defmt")]
         defmt::info!("Resetting device");
-        
+
         Ok(())
     }
-    
+
     /// Reset port
     fn reset_port(&mut self, controller: Option<&mut EhciController<8>>) -> Result<()> {
         if controller.is_none() {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         unsafe {
             // Set port reset bit
             let portsc_addr = (0x402E_0184) as *mut u32; // PORTSC[0]
             let mut portsc = core::ptr::read_volatile(portsc_addr);
             portsc |= 1 << 8; // Port Reset
             core::ptr::write_volatile(portsc_addr, portsc);
-            
+
             // Wait for reset to complete (10ms minimum per USB spec)
             self.delay_ms(10);
-            
+
             // Clear reset bit
             portsc = core::ptr::read_volatile(portsc_addr);
             portsc &= !(1 << 8);
             core::ptr::write_volatile(portsc_addr, portsc);
-            
+
             // Wait for port to stabilize
             self.delay_ms(10);
         }
-        
+
         #[cfg(feature = "defmt")]
         defmt::info!("Port reset completed");
-        
+
         Ok(())
     }
-    
+
     /// Reset controller
     fn reset_controller(
         &mut self,
@@ -268,19 +248,20 @@ impl RecoveryCoordinator {
     ) -> Result<()> {
         #[cfg(feature = "defmt")]
         defmt::warn!("Resetting USB controller");
-        
+
         // Stop controller
         unsafe {
             let usbcmd_addr = (0x402E_0140) as *mut u32; // USBCMD
             let mut cmd = core::ptr::read_volatile(usbcmd_addr);
             cmd &= !(1 << 0); // Clear Run/Stop
             core::ptr::write_volatile(usbcmd_addr, cmd);
-            
+
             // Wait for halt
             let mut timeout = 1000;
             loop {
                 let status = core::ptr::read_volatile((0x402E_0144) as *const u32);
-                if status & (1 << 12) != 0 { // HCHalted
+                if status & (1 << 12) != 0 {
+                    // HCHalted
                     break;
                 }
                 timeout -= 1;
@@ -289,11 +270,11 @@ impl RecoveryCoordinator {
                 }
                 self.delay_us(10);
             }
-            
+
             // Reset controller
             cmd |= 1 << 1; // Host Controller Reset
             core::ptr::write_volatile(usbcmd_addr, cmd);
-            
+
             // Wait for reset to complete
             timeout = 1000;
             loop {
@@ -308,48 +289,48 @@ impl RecoveryCoordinator {
                 self.delay_us(10);
             }
         }
-        
+
         // Re-initialize PHY if available
         if let Some(phy) = phy {
             phy.init_host_mode()?;
         }
-        
+
         // Re-initialize controller if available
         // controller would need re-initialization here
-        
+
         #[cfg(feature = "defmt")]
         defmt::info!("Controller reset completed");
-        
+
         Ok(())
     }
-    
+
     /// Power cycle device
     fn power_cycle(&mut self, vbus: Option<&mut dyn VbusPowerControl>) -> Result<()> {
         if let Some(vbus) = vbus {
             #[cfg(feature = "defmt")]
             defmt::warn!("Power cycling USB device");
-            
+
             // Disable VBUS
             vbus.disable_vbus();
-            
+
             // Wait for discharge
             self.delay_ms(500);
-            
+
             // Re-enable VBUS
             vbus.enable_vbus()?;
-            
+
             // Wait for power stabilization
             self.delay_ms(100);
-            
+
             #[cfg(feature = "defmt")]
             defmt::info!("Power cycle completed");
         } else {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         Ok(())
     }
-    
+
     /// Calculate exponential backoff delay
     fn calculate_backoff(&self) -> u32 {
         let current = self.backoff_ms.load(Ordering::Relaxed);
@@ -357,14 +338,14 @@ impl RecoveryCoordinator {
         self.backoff_ms.store(next, Ordering::Relaxed);
         current
     }
-    
+
     /// Delay for specified milliseconds
     fn delay_ms(&self, ms: u32) {
         for _ in 0..ms {
             self.delay_us(1000);
         }
     }
-    
+
     /// Delay for specified microseconds
     fn delay_us(&self, us: u32) {
         let start = cortex_m::peripheral::DWT::cycle_count();
@@ -373,31 +354,30 @@ impl RecoveryCoordinator {
             cortex_m::asm::nop();
         }
     }
-    
+
     /// Verify recovery success
     pub fn verify_recovery(&mut self) -> Result<()> {
         if self.state != RecoveryState::Verifying {
             return Err(UsbError::InvalidState);
         }
-        
+
         // Perform health checks
         // This would check PHY, controller, and transfer status
-        
+
         self.state = RecoveryState::Normal;
         Ok(())
     }
-    
+
     /// Check if recovery is possible
     pub fn can_recover(&self) -> bool {
-        self.state != RecoveryState::Failed &&
-        self.stats.recovery_attempts() < self.max_attempts
+        self.state != RecoveryState::Failed && self.stats.recovery_attempts() < self.max_attempts
     }
-    
+
     /// Get recovery statistics
     pub fn statistics(&self) -> &RecoveryStats {
         &self.stats
     }
-    
+
     /// Reset recovery state
     pub fn reset(&mut self) {
         self.state = RecoveryState::Normal;
@@ -438,36 +418,36 @@ impl RecoveryStats {
             last_error: AtomicU8::new(0),
         }
     }
-    
+
     fn record_error(&self, error: &UsbError) {
         let index = Self::error_to_index(error);
         self.error_counts[index].fetch_add(1, Ordering::Relaxed);
         self.total_errors.fetch_add(1, Ordering::Relaxed);
         self.last_error.store(index as u8, Ordering::Relaxed);
     }
-    
+
     fn record_retry(&self) {
         self.retry_count.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_recovery_success(&self) {
         self.recovery_successes.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_recovery_failure(&self) {
         self.recovery_failures.fetch_add(1, Ordering::Relaxed);
         self.recovery_attempts.fetch_add(1, Ordering::AcqRel);
     }
-    
+
     fn recovery_attempts(&self) -> u8 {
         self.recovery_attempts.load(Ordering::Acquire)
     }
-    
+
     fn is_recurring_error(&self, error: &UsbError) -> bool {
         let index = Self::error_to_index(error);
         self.error_counts[index].load(Ordering::Relaxed) > 3
     }
-    
+
     fn error_to_index(error: &UsbError) -> usize {
         match error {
             UsbError::AlreadyInitialized => 0,
@@ -486,7 +466,7 @@ impl RecoveryStats {
             UsbError::HardwareFailure => 22,
         }
     }
-    
+
     fn reset(&self) {
         for counter in &self.error_counts {
             counter.store(0, Ordering::Relaxed);
@@ -498,12 +478,12 @@ impl RecoveryStats {
         self.retry_count.store(0, Ordering::Relaxed);
         self.last_error.store(0, Ordering::Relaxed);
     }
-    
+
     /// Get success rate
     pub fn success_rate(&self) -> f32 {
         let successes = self.recovery_successes.load(Ordering::Relaxed) as f32;
-        let total = (self.recovery_successes.load(Ordering::Relaxed) +
-                     self.recovery_failures.load(Ordering::Relaxed)) as f32;
+        let total = (self.recovery_successes.load(Ordering::Relaxed)
+            + self.recovery_failures.load(Ordering::Relaxed)) as f32;
         if total > 0.0 {
             successes / total
         } else {

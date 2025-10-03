@@ -9,7 +9,7 @@
 mod common;
 
 use common::create_mock_buffer;
-use imxrt_usbh::dma::{DmaBufferPool, BufferStats};
+use imxrt_usbh::dma::{BufferStats, DmaBufferPool};
 use imxrt_usbh::transfer::{BulkTransferManager, Direction};
 use imxrt_usbh::UsbError;
 
@@ -88,7 +88,9 @@ mod tests {
             let buf = dma_pool.alloc(512).expect("DMA alloc failed");
 
             // Transfer manager allocation
-            let idx = bulk_mgr.submit(Direction::In, 1, 0x81, 64, buf, 1000).unwrap();
+            let idx = bulk_mgr
+                .submit(Direction::In, 1, 0x81, 64, buf, 1000)
+                .unwrap();
             assert_eq!(idx, i);
             allocated += 1;
         }
@@ -173,7 +175,9 @@ mod tests {
         // Fill to capacity
         for i in 0..4 {
             let buf = create_mock_buffer(512, i);
-            assert!(bulk_mgr.submit(Direction::In, 1, 0x81, 64, buf, 1000).is_ok());
+            assert!(bulk_mgr
+                .submit(Direction::In, 1, 0x81, 64, buf, 1000)
+                .is_ok());
         }
 
         // Multiple attempts to allocate should all fail
@@ -213,7 +217,9 @@ mod tests {
 
         // Track stats as we fill the pool
         for expected_allocated in 1..=32 {
-            let buf = pool.alloc(512).expect(&alloc::format!("Failed at {}", expected_allocated));
+            let buf = pool
+                .alloc(512)
+                .expect(&alloc::format!("Failed at {}", expected_allocated));
 
             let stats = pool.buffer_stats();
             assert_eq!(stats.allocated_buffers, expected_allocated);
@@ -260,7 +266,9 @@ mod tests {
         let mut buffers = heapless::Vec::<_, 6>::new();
 
         for &size in &sizes {
-            let buf = pool.alloc(size).expect(&alloc::format!("Failed size {}", size));
+            let buf = pool
+                .alloc(size)
+                .expect(&alloc::format!("Failed size {}", size));
             assert_eq!(buf.len(), size);
             buffers.push(buf).ok();
         }

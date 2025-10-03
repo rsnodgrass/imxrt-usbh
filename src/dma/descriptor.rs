@@ -1,11 +1,11 @@
 //! Enhanced descriptor management with lifecycle tracking
-//! 
+//!
 //! Provides allocation, tracking, and recycling of USB descriptors
 
+use crate::ehci::{QueueHead, QueueTD};
 use crate::error::{Result, UsbError};
-use crate::ehci::{QueueTD, QueueHead};
-use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use core::ptr::NonNull;
+use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 /// Descriptor lifecycle states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,46 +61,46 @@ impl<T> ManagedDescriptor<T> {
             type_tag: Self::type_tag_value(),
         }
     }
-    
+
     /// Get type tag for this descriptor type
     const fn type_tag_value() -> u16 {
         // Use size as a simple type discriminator
         core::mem::size_of::<T>() as u16
     }
-    
+
     /// Transition to new state with validation
     pub fn transition_state(&self, from: DescriptorState, to: DescriptorState) -> Result<()> {
         let current = self.state.load(Ordering::Acquire);
         if current != from as u8 {
             return Err(UsbError::InvalidState);
         }
-        
+
         // Validate state transition
         match (from, to) {
-            (DescriptorState::Free, DescriptorState::Allocated) |
-            (DescriptorState::Allocated, DescriptorState::Queued) |
-            (DescriptorState::Queued, DescriptorState::Active) |
-            (DescriptorState::Active, DescriptorState::Complete) |
-            (DescriptorState::Active, DescriptorState::Error) |
-            (DescriptorState::Complete, DescriptorState::Free) |
-            (DescriptorState::Error, DescriptorState::Free) => {
+            (DescriptorState::Free, DescriptorState::Allocated)
+            | (DescriptorState::Allocated, DescriptorState::Queued)
+            | (DescriptorState::Queued, DescriptorState::Active)
+            | (DescriptorState::Active, DescriptorState::Complete)
+            | (DescriptorState::Active, DescriptorState::Error)
+            | (DescriptorState::Complete, DescriptorState::Free)
+            | (DescriptorState::Error, DescriptorState::Free) => {
                 self.state.store(to as u8, Ordering::Release);
                 Ok(())
             }
-            _ => Err(UsbError::InvalidState)
+            _ => Err(UsbError::InvalidState),
         }
     }
-    
+
     /// Get pool index for recycling
     pub fn pool_index(&self) -> usize {
         self.pool_index as usize
     }
-    
-    /// Validate descriptor type integrity  
+
+    /// Validate descriptor type integrity
     pub fn validate_type(&self) -> bool {
         self.type_tag == Self::type_tag_value()
     }
-    
+
     /// Get descriptor type information
     pub fn type_info(&self) -> DescriptorTypeInfo {
         DescriptorTypeInfo {
@@ -109,7 +109,7 @@ impl<T> ManagedDescriptor<T> {
             pool_index: self.pool_index as usize,
         }
     }
-    
+
     /// Increment reference count
     pub fn acquire(&self) -> Result<()> {
         let old_count = self.ref_count.fetch_add(1, Ordering::AcqRel);
@@ -120,13 +120,13 @@ impl<T> ManagedDescriptor<T> {
         }
         Ok(())
     }
-    
+
     /// Decrement reference count
     pub fn release(&self) -> bool {
         let old_count = self.ref_count.fetch_sub(1, Ordering::AcqRel);
         old_count == 1 // Returns true if this was the last reference
     }
-    
+
     /// Get current state
     pub fn state(&self) -> DescriptorState {
         match self.state.load(Ordering::Acquire) {
@@ -139,7 +139,7 @@ impl<T> ManagedDescriptor<T> {
             _ => DescriptorState::Error,
         }
     }
-    
+
     /// Access descriptor (only when allocated)
     pub fn access(&self) -> Result<&T> {
         let state = self.state();
@@ -148,7 +148,7 @@ impl<T> ManagedDescriptor<T> {
         }
         unsafe { Ok(self.descriptor.as_ref()) }
     }
-    
+
     /// Mutable access to descriptor (only when allocated and not active)
     pub fn access_mut(&mut self) -> Result<&mut T> {
         let state = self.state();
@@ -171,48 +171,50 @@ pub struct DescriptorAllocator<const N_QH: usize, const N_QTD: usize> {
 
 impl<const N_QH: usize, const N_QTD: usize> DescriptorAllocator<N_QH, N_QTD> {
     /// Create new allocator
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// Caller must ensure memory is properly aligned and will remain valid
     pub unsafe fn new(
         qh_memory: &mut [QueueHead; N_QH],
         qtd_memory: &mut [QueueTD; N_QTD],
     ) -> Self {
         // Initialize managed descriptors
-        let mut qh_descriptors = core::mem::MaybeUninit::<[ManagedDescriptor<QueueHead>; N_QH]>::uninit();
-        let mut qtd_descriptors = core::mem::MaybeUninit::<[ManagedDescriptor<QueueTD>; N_QTD]>::uninit();
-        
+        let mut qh_descriptors =
+            core::mem::MaybeUninit::<[ManagedDescriptor<QueueHead>; N_QH]>::uninit();
+        let mut qtd_descriptors =
+            core::mem::MaybeUninit::<[ManagedDescriptor<QueueTD>; N_QTD]>::uninit();
+
         let qh_ptr = qh_descriptors.as_mut_ptr() as *mut ManagedDescriptor<QueueHead>;
         let qtd_ptr = qtd_descriptors.as_mut_ptr() as *mut ManagedDescriptor<QueueTD>;
-        
+
         for i in 0..N_QH {
             let desc = ManagedDescriptor::new(
                 unsafe { NonNull::new_unchecked(&mut qh_memory[i] as *mut QueueHead) },
-                i
+                i,
             );
             unsafe {
                 qh_ptr.add(i).write(desc);
             }
         }
-        
+
         for i in 0..N_QTD {
             let desc = ManagedDescriptor::new(
                 unsafe { NonNull::new_unchecked(&mut qtd_memory[i] as *mut QueueTD) },
-                i
+                i,
             );
             unsafe {
                 qtd_ptr.add(i).write(desc);
             }
         }
-        
+
         Self {
             qh_descriptors: unsafe { qh_descriptors.assume_init() },
             qtd_descriptors: unsafe { qtd_descriptors.assume_init() },
             stats: AllocationStats::new(),
         }
     }
-    
+
     /// Allocate queue head with lifecycle management
     pub fn alloc_qh(&mut self) -> Result<QhHandle> {
         for (index, managed) in self.qh_descriptors.iter_mut().enumerate() {
@@ -220,22 +222,22 @@ impl<const N_QH: usize, const N_QTD: usize> DescriptorAllocator<N_QH, N_QTD> {
                 managed.transition_state(DescriptorState::Free, DescriptorState::Allocated)?;
                 managed.acquire()?;
                 self.stats.record_qh_alloc();
-                
+
                 // Initialize the QH
                 let qh = managed.access_mut()?;
                 *qh = QueueHead::new();
-                
+
                 return Ok(QhHandle {
                     index,
                     generation: self.stats.allocation_generation(),
                 });
             }
         }
-        
+
         self.stats.record_qh_exhaustion();
         Err(UsbError::NoResources)
     }
-    
+
     /// Allocate queue TD with lifecycle management
     pub fn alloc_qtd(&mut self) -> Result<QtdHandle> {
         for (index, managed) in self.qtd_descriptors.iter_mut().enumerate() {
@@ -243,136 +245,182 @@ impl<const N_QH: usize, const N_QTD: usize> DescriptorAllocator<N_QH, N_QTD> {
                 managed.transition_state(DescriptorState::Free, DescriptorState::Allocated)?;
                 managed.acquire()?;
                 self.stats.record_qtd_alloc();
-                
+
                 // Initialize the qTD
                 let qtd = managed.access_mut()?;
                 *qtd = QueueTD::new();
-                
+
                 return Ok(QtdHandle {
                     index,
                     generation: self.stats.allocation_generation(),
                 });
             }
         }
-        
+
         self.stats.record_qtd_exhaustion();
         Err(UsbError::NoResources)
     }
-    
+
     /// Free queue head
     pub fn free_qh(&mut self, handle: QhHandle) -> Result<()> {
         if handle.index >= N_QH {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         let managed = &mut self.qh_descriptors[handle.index];
-        
+
         // Ensure it's in a freeable state
         let state = managed.state();
         if state != DescriptorState::Complete && state != DescriptorState::Error {
             return Err(UsbError::InvalidState);
         }
-        
+
         if managed.release() {
             // Last reference, can actually free
             managed.transition_state(state, DescriptorState::Free)?;
             self.stats.record_qh_free();
         }
-        
+
         Ok(())
     }
-    
+
     /// Free queue TD
     pub fn free_qtd(&mut self, handle: QtdHandle) -> Result<()> {
         if handle.index >= N_QTD {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         let managed = &mut self.qtd_descriptors[handle.index];
-        
+
         // Ensure it's in a freeable state
         let state = managed.state();
         if state != DescriptorState::Complete && state != DescriptorState::Error {
             return Err(UsbError::InvalidState);
         }
-        
+
         if managed.release() {
             // Last reference, can actually free
             managed.transition_state(state, DescriptorState::Free)?;
             self.stats.record_qtd_free();
         }
-        
+
         Ok(())
     }
-    
+
     /// Mark descriptor as queued for hardware
     pub fn mark_qh_queued(&mut self, handle: QhHandle) -> Result<()> {
         if handle.index >= N_QH {
             return Err(UsbError::InvalidParameter);
         }
-        
-        self.qh_descriptors[handle.index].transition_state(
-            DescriptorState::Allocated,
-            DescriptorState::Queued
-        )
+
+        self.qh_descriptors[handle.index]
+            .transition_state(DescriptorState::Allocated, DescriptorState::Queued)
     }
-    
+
     /// Mark descriptor as active (being processed by hardware)
     pub fn mark_qh_active(&mut self, handle: QhHandle) -> Result<()> {
         if handle.index >= N_QH {
             return Err(UsbError::InvalidParameter);
         }
-        
-        self.qh_descriptors[handle.index].transition_state(
-            DescriptorState::Queued,
-            DescriptorState::Active
-        )
+
+        self.qh_descriptors[handle.index]
+            .transition_state(DescriptorState::Queued, DescriptorState::Active)
     }
-    
+
     /// Mark descriptor as completed
     pub fn mark_qh_complete(&mut self, handle: QhHandle) -> Result<()> {
         if handle.index >= N_QH {
             return Err(UsbError::InvalidParameter);
         }
-        
-        self.qh_descriptors[handle.index].transition_state(
-            DescriptorState::Active,
-            DescriptorState::Complete
-        )
+
+        self.qh_descriptors[handle.index]
+            .transition_state(DescriptorState::Active, DescriptorState::Complete)
     }
-    
+
     /// Get allocator statistics
     pub fn statistics(&self) -> &AllocationStats {
         &self.stats
     }
-    
+
     /// Perform garbage collection of leaked descriptors
     pub fn garbage_collect(&mut self) -> usize {
         let mut collected = 0;
-        
+
         // Check for leaked QHs
         for managed in &mut self.qh_descriptors {
             if managed.state() == DescriptorState::Allocated {
                 // Check if it's been allocated for too long without being queued
                 // This is a simplified check - real implementation would track time
                 if managed.ref_count.load(Ordering::Acquire) == 0 {
-                    let _ = managed.transition_state(DescriptorState::Allocated, DescriptorState::Free);
+                    let _ =
+                        managed.transition_state(DescriptorState::Allocated, DescriptorState::Free);
                     collected += 1;
                 }
             }
         }
-        
+
         // Check for leaked qTDs
         for managed in &mut self.qtd_descriptors {
             if managed.state() == DescriptorState::Allocated {
                 if managed.ref_count.load(Ordering::Acquire) == 0 {
-                    let _ = managed.transition_state(DescriptorState::Allocated, DescriptorState::Free);
+                    let _ =
+                        managed.transition_state(DescriptorState::Allocated, DescriptorState::Free);
                     collected += 1;
                 }
             }
         }
-        
+
         collected
+    }
+
+    /// Get reference to QH
+    pub fn get_qh(&self, handle: &QhHandle) -> Result<&QueueHead> {
+        if handle.index >= N_QH {
+            return Err(UsbError::InvalidParameter);
+        }
+        self.qh_descriptors[handle.index].access()
+    }
+
+    /// Get mutable reference to QH
+    pub fn get_qh_mut(&mut self, handle: &QhHandle) -> Result<&mut QueueHead> {
+        if handle.index >= N_QH {
+            return Err(UsbError::InvalidParameter);
+        }
+        self.qh_descriptors[handle.index].access_mut()
+    }
+
+    /// Get reference to qTD
+    pub fn get_qtd(&self, handle: &QtdHandle) -> Result<&QueueTD> {
+        if handle.index >= N_QTD {
+            return Err(UsbError::InvalidParameter);
+        }
+        self.qtd_descriptors[handle.index].access()
+    }
+
+    /// Get mutable reference to qTD
+    pub fn get_qtd_mut(&mut self, handle: &QtdHandle) -> Result<&mut QueueTD> {
+        if handle.index >= N_QTD {
+            return Err(UsbError::InvalidParameter);
+        }
+        self.qtd_descriptors[handle.index].access_mut()
+    }
+
+    /// Get physical DMA address of QH
+    pub fn get_qh_addr(&self, handle: &QhHandle) -> Result<u32> {
+        if handle.index >= N_QH {
+            return Err(UsbError::InvalidParameter);
+        }
+        let qh = self.qh_descriptors[handle.index].access()?;
+        Ok(qh as *const QueueHead as u32)
+    }
+
+    /// Get physical DMA address of qTD
+    pub fn get_qtd_addr(&self, handle: &QtdHandle) -> Result<u32> {
+        if handle.index >= N_QTD {
+            return Err(UsbError::InvalidParameter);
+        }
+        let qtd = self.qtd_descriptors[handle.index].access()?;
+        Ok(qtd as *const QueueTD as u32)
     }
 }
 
@@ -394,15 +442,15 @@ impl QhHandle {
     pub fn new(index: usize, generation: u32) -> Self {
         Self { index, generation }
     }
-    
+
     pub fn index(&self) -> usize {
         self.index
     }
-    
+
     pub fn generation(&self) -> u32 {
         self.generation
     }
-    
+
     /// Check if handle is still valid (generation matches)
     pub fn is_valid(&self, expected_generation: u32) -> bool {
         self.generation == expected_generation
@@ -413,15 +461,15 @@ impl QtdHandle {
     pub fn new(index: usize, generation: u32) -> Self {
         Self { index, generation }
     }
-    
+
     pub fn index(&self) -> usize {
         self.index
     }
-    
+
     pub fn generation(&self) -> u32 {
         self.generation
     }
-    
+
     /// Check if handle is still valid (generation matches)
     pub fn is_valid(&self, expected_generation: u32) -> bool {
         self.generation == expected_generation
@@ -451,49 +499,53 @@ impl AllocationStats {
             generation: AtomicU32::new(0),
         }
     }
-    
+
     fn record_qh_alloc(&self) {
         self.qh_allocations.fetch_add(1, Ordering::Relaxed);
         self.generation.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_qh_free(&self) {
         self.qh_frees.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_qh_exhaustion(&self) {
         self.qh_exhaustions.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_qtd_alloc(&self) {
         self.qtd_allocations.fetch_add(1, Ordering::Relaxed);
         self.generation.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_qtd_free(&self) {
         self.qtd_frees.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn record_qtd_exhaustion(&self) {
         self.qtd_exhaustions.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn allocation_generation(&self) -> u32 {
         self.generation.load(Ordering::Relaxed)
     }
-    
+
     /// Get current statistics snapshot
     pub fn snapshot(&self) -> StatsSnapshot {
         StatsSnapshot {
             qh_allocations: self.qh_allocations.load(Ordering::Relaxed),
             qh_frees: self.qh_frees.load(Ordering::Relaxed),
             qh_exhaustions: self.qh_exhaustions.load(Ordering::Relaxed),
-            qh_leaked: self.qh_allocations.load(Ordering::Relaxed)
+            qh_leaked: self
+                .qh_allocations
+                .load(Ordering::Relaxed)
                 .saturating_sub(self.qh_frees.load(Ordering::Relaxed)),
             qtd_allocations: self.qtd_allocations.load(Ordering::Relaxed),
             qtd_frees: self.qtd_frees.load(Ordering::Relaxed),
             qtd_exhaustions: self.qtd_exhaustions.load(Ordering::Relaxed),
-            qtd_leaked: self.qtd_allocations.load(Ordering::Relaxed)
+            qtd_leaked: self
+                .qtd_allocations
+                .load(Ordering::Relaxed)
                 .saturating_sub(self.qtd_frees.load(Ordering::Relaxed)),
         }
     }
@@ -519,7 +571,7 @@ impl StatsSnapshot {
     pub fn has_leaks(&self) -> bool {
         self.qh_leaked > 0 || self.qtd_leaked > 0
     }
-    
+
     /// Check if pools have been exhausted
     pub fn has_exhaustions(&self) -> bool {
         self.qh_exhaustions > 0 || self.qtd_exhaustions > 0

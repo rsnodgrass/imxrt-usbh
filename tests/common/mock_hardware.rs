@@ -26,74 +26,74 @@ pub fn create_mock_buffer(size: usize, index: usize) -> DmaBuffer {
 /// Create a standard USB 2.0 device descriptor for testing
 pub fn create_test_device_descriptor() -> [u8; 18] {
     [
-        0x12,       // bLength
-        0x01,       // bDescriptorType (DEVICE)
+        0x12, // bLength
+        0x01, // bDescriptorType (DEVICE)
         0x00, 0x02, // bcdUSB (2.0)
-        0x00,       // bDeviceClass (defined at interface level)
-        0x00,       // bDeviceSubClass
-        0x00,       // bDeviceProtocol
-        0x40,       // bMaxPacketSize0 (64 bytes)
+        0x00, // bDeviceClass (defined at interface level)
+        0x00, // bDeviceSubClass
+        0x00, // bDeviceProtocol
+        0x40, // bMaxPacketSize0 (64 bytes)
         0x83, 0x04, // idVendor (0x0483 - STMicroelectronics)
         0x40, 0x00, // idProduct (0x0040)
         0x00, 0x01, // bcdDevice (1.0)
-        0x01,       // iManufacturer
-        0x02,       // iProduct
-        0x03,       // iSerialNumber
-        0x01,       // bNumConfigurations
+        0x01, // iManufacturer
+        0x02, // iProduct
+        0x03, // iSerialNumber
+        0x01, // bNumConfigurations
     ]
 }
 
 /// Create a standard USB configuration descriptor for testing
 pub fn create_test_config_descriptor() -> [u8; 9] {
     [
-        0x09,       // bLength
-        0x02,       // bDescriptorType (CONFIGURATION)
+        0x09, // bLength
+        0x02, // bDescriptorType (CONFIGURATION)
         0x09, 0x00, // wTotalLength (9 bytes - just header for testing)
-        0x01,       // bNumInterfaces
-        0x01,       // bConfigurationValue
-        0x00,       // iConfiguration
-        0x80,       // bmAttributes (bus powered)
-        0x32,       // bMaxPower (100mA)
+        0x01, // bNumInterfaces
+        0x01, // bConfigurationValue
+        0x00, // iConfiguration
+        0x80, // bmAttributes (bus powered)
+        0x32, // bMaxPower (100mA)
     ]
 }
 
 /// Create a MIDI device descriptor (Audio class) for testing
 pub fn create_midi_device_descriptor() -> [u8; 18] {
     [
-        0x12,       // bLength
-        0x01,       // bDescriptorType (DEVICE)
+        0x12, // bLength
+        0x01, // bDescriptorType (DEVICE)
         0x00, 0x02, // bcdUSB (2.0)
-        0x01,       // bDeviceClass (Audio)
-        0x00,       // bDeviceSubClass
-        0x00,       // bDeviceProtocol
-        0x40,       // bMaxPacketSize0 (64 bytes)
+        0x01, // bDeviceClass (Audio)
+        0x00, // bDeviceSubClass
+        0x00, // bDeviceProtocol
+        0x40, // bMaxPacketSize0 (64 bytes)
         0x82, 0x08, // idVendor (0x0882 - Roland)
         0x01, 0x00, // idProduct
         0x00, 0x01, // bcdDevice (1.0)
-        0x01,       // iManufacturer
-        0x02,       // iProduct
-        0x03,       // iSerialNumber
-        0x01,       // bNumConfigurations
+        0x01, // iManufacturer
+        0x02, // iProduct
+        0x03, // iSerialNumber
+        0x01, // bNumConfigurations
     ]
 }
 
 /// Create an HID keyboard device descriptor for testing
 pub fn create_hid_device_descriptor() -> [u8; 18] {
     [
-        0x12,       // bLength
-        0x01,       // bDescriptorType (DEVICE)
+        0x12, // bLength
+        0x01, // bDescriptorType (DEVICE)
         0x00, 0x02, // bcdUSB (2.0)
-        0x00,       // bDeviceClass (defined at interface)
-        0x00,       // bDeviceSubClass
-        0x00,       // bDeviceProtocol
-        0x08,       // bMaxPacketSize0 (8 bytes for low-speed)
+        0x00, // bDeviceClass (defined at interface)
+        0x00, // bDeviceSubClass
+        0x00, // bDeviceProtocol
+        0x08, // bMaxPacketSize0 (8 bytes for low-speed)
         0x6D, 0x04, // idVendor (0x046D - Logitech)
         0x16, 0xC0, // idProduct (0xC016 - Keyboard)
         0x10, 0x00, // bcdDevice (0.16)
-        0x01,       // iManufacturer
-        0x02,       // iProduct
-        0x00,       // iSerialNumber
-        0x01,       // bNumConfigurations
+        0x01, // iManufacturer
+        0x02, // iProduct
+        0x00, // iSerialNumber
+        0x01, // bNumConfigurations
     ]
 }
 

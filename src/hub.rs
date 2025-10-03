@@ -96,12 +96,13 @@
 //!
 //! Based on USB 2.0 Hub Specification and EHCI 1.0 Section 4 (Split Transactions)
 
-use crate::error::{Result, UsbError};
-use crate::transfer::{Direction, SetupPacket};
-use crate::transfer::control::ControlTransfer;
 use crate::dma::DescriptorAllocator;
-use crate::ehci::qh::{QueueHead, capabilities};
-use core::sync::atomic::{AtomicU8, AtomicU32, AtomicBool, Ordering};
+use crate::dma::UsbMemoryPool;
+use crate::ehci::qh::{capabilities, QueueHead};
+use crate::ehci::TransferExecutor;
+use crate::error::{Result, UsbError};
+use crate::transfer::Direction;
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
 /// USB Hub Class Code
 pub const HUB_CLASS: u8 = 0x09;
@@ -169,7 +170,7 @@ impl PortStatus {
             indicator: (status & (1 << 12)) != 0,
         }
     }
-    
+
     /// Get device speed based on port status
     pub fn device_speed(&self) -> DeviceSpeed {
         if self.high_speed {
@@ -208,9 +209,9 @@ impl PortChange {
 /// USB device speeds
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceSpeed {
-    Low,    // 1.5 Mbps
-    Full,   // 12 Mbps
-    High,   // 480 Mbps
+    Low,  // 1.5 Mbps
+    Full, // 12 Mbps
+    High, // 480 Mbps
 }
 
 /// Hub descriptor (USB 2.0)
@@ -220,7 +221,7 @@ pub struct HubDescriptor {
     pub descriptor_type: u8,
     pub num_ports: u8,
     pub characteristics: u16,
-    pub power_on_to_good: u8,  // Time in 2ms units
+    pub power_on_to_good: u8, // Time in 2ms units
     pub hub_control_current: u8,
     // Variable length fields follow:
     // - DeviceRemovable[(num_ports + 7) / 8]
@@ -252,7 +253,7 @@ impl TransactionTranslator {
             max_splits: 16, // Typical TT can handle 16 concurrent splits
         }
     }
-    
+
     /// Allocate TT bandwidth for a split transaction
     pub fn allocate_split(&self) -> Result<()> {
         let current = self.active_splits.fetch_add(1, Ordering::AcqRel);
@@ -262,43 +263,43 @@ impl TransactionTranslator {
         }
         Ok(())
     }
-    
+
     /// Release TT bandwidth
     pub fn release_split(&self) {
         self.active_splits.fetch_sub(1, Ordering::AcqRel);
     }
-    
+
     /// Configure QH for split transaction
     pub fn configure_qh_split(&self, qh: &mut QueueHead, speed: DeviceSpeed) {
         // Set hub address and port in endpoint capabilities
         let mut caps = qh.endpoint_caps.load(Ordering::Acquire);
-        
+
         // Clear existing hub info
         caps &= !(capabilities::HUB_ADDRESS_MASK << capabilities::HUB_ADDRESS_SHIFT);
         caps &= !(capabilities::PORT_NUMBER_MASK << capabilities::PORT_NUMBER_SHIFT);
-        
+
         // Set hub address and port
-        caps |= (self.hub_address as u32 & capabilities::HUB_ADDRESS_MASK) 
-                << capabilities::HUB_ADDRESS_SHIFT;
-        caps |= (self.hub_port as u32 & capabilities::PORT_NUMBER_MASK) 
-                << capabilities::PORT_NUMBER_SHIFT;
-        
+        caps |= (self.hub_address as u32 & capabilities::HUB_ADDRESS_MASK)
+            << capabilities::HUB_ADDRESS_SHIFT;
+        caps |= (self.hub_port as u32 & capabilities::PORT_NUMBER_MASK)
+            << capabilities::PORT_NUMBER_SHIFT;
+
         // Set split completion mask for interrupt/isochronous
         // Use microframes 2, 3, 4 for complete-split by default
         caps |= 0x1C << capabilities::SPLIT_COMPLETION_MASK_SHIFT;
-        
+
         qh.endpoint_caps.store(caps, Ordering::Release);
-        
+
         // Mark endpoint as full/low speed in endpoint characteristics
         let mut chars = qh.endpoint_chars.load(Ordering::Acquire);
         chars &= !(0x3 << 12); // Clear speed bits
-        
+
         match speed {
             DeviceSpeed::Full => chars |= 0 << 12,
             DeviceSpeed::Low => chars |= 1 << 12,
-            DeviceSpeed::High => {}, // Should not use TT for high-speed
+            DeviceSpeed::High => {} // Should not use TT for high-speed
         }
-        
+
         qh.endpoint_chars.store(chars, Ordering::Release);
     }
 }
@@ -318,12 +319,12 @@ impl SplitTiming {
     /// Get timing for control/bulk transfers
     pub fn control_bulk() -> Self {
         Self {
-            start_mask: 0x01,     // Start in microframe 0
-            complete_mask: 0x1C,  // Complete in microframes 2, 3, 4
-            additional_cs: 2,      // Allow 2 retries
+            start_mask: 0x01,    // Start in microframe 0
+            complete_mask: 0x1C, // Complete in microframes 2, 3, 4
+            additional_cs: 2,    // Allow 2 retries
         }
     }
-    
+
     /// Get timing for interrupt transfers
     pub fn interrupt(interval: u8) -> Self {
         // For simplicity, use same pattern as control/bulk
@@ -334,13 +335,13 @@ impl SplitTiming {
             additional_cs: 2,
         }
     }
-    
+
     /// Get timing for isochronous transfers
     pub fn isochronous() -> Self {
         Self {
-            start_mask: 0x01,     // Fixed start
-            complete_mask: 0x0E,  // Microframes 1, 2, 3
-            additional_cs: 0,      // No retries for isochronous
+            start_mask: 0x01,    // Fixed start
+            complete_mask: 0x0E, // Microframes 1, 2, 3
+            additional_cs: 0,    // No retries for isochronous
         }
     }
 }
@@ -372,20 +373,20 @@ pub struct Hub {
 impl Hub {
     /// Maximum hub depth per USB 2.0 specification
     pub const MAX_DEPTH: u8 = 5;
-    
+
     /// Create new hub instance
     pub fn new(address: u8, descriptor: &HubDescriptor, depth: u8) -> Result<Self> {
         if depth > Self::MAX_DEPTH {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         if descriptor.num_ports > 8 {
             // Limitation for this implementation
             return Err(UsbError::InvalidParameter);
         }
-        
+
         let is_multi_tt = (descriptor.characteristics & 0x0080) != 0;
-        
+
         Ok(Self {
             address,
             num_ports: descriptor.num_ports,
@@ -399,201 +400,294 @@ impl Hub {
             depth,
         })
     }
-    
+
     /// Initialize hub (power on ports, etc.)
-    pub async fn initialize(&mut self) -> Result<()> {
+    pub fn initialize(
+        &mut self,
+        executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<()> {
         // Power on all ports
         for port in 1..=self.num_ports {
-            self.set_port_feature(port, PortFeature::PortPower).await?;
+            self.set_port_feature(port, PortFeature::PortPower, executor, memory_pool)?;
         }
-        
-        // Wait for power-good
-        #[cfg(feature = "embassy")]
-        embassy_time::Timer::after_millis(self.power_on_time as u64).await;
-        
+
+        // Wait for power-good (simple delay loop using DWT if available)
+        // In production, use proper delay mechanism
+        cortex_m::asm::delay(self.power_on_time as u32 * 600_000); // Assumes 600 MHz CPU
+
         // Initialize Transaction Translators
         for port in 0..self.num_ports as usize {
             if self.is_multi_tt {
                 // Multi-TT: one TT per port
-                self.transaction_translators[port] = Some(
-                    TransactionTranslator::new(self.address, (port + 1) as u8, 8)
-                );
+                self.transaction_translators[port] = Some(TransactionTranslator::new(
+                    self.address,
+                    (port + 1) as u8,
+                    8,
+                ));
             } else if port == 0 {
                 // Single-TT: shared TT on port 1
-                self.transaction_translators[0] = Some(
-                    TransactionTranslator::new(self.address, 1, 8)
-                );
+                self.transaction_translators[0] =
+                    Some(TransactionTranslator::new(self.address, 1, 8));
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get hub status
-    pub async fn get_hub_status(&self) -> Result<u32> {
-        let setup = SetupPacket {
-            request_type: 0xA0, // Device-to-host, class, device
-            request: 0x00,      // GET_STATUS
-            value: 0,
-            index: 0,
-            length: 4,
-        };
-        
-        let mut status_data = [0u8; 4];
-        // Execute control transfer to get hub status
-        // This would use the control transfer implementation
-        
-        Ok(u32::from_le_bytes(status_data))
+    pub fn get_hub_status(
+        &self,
+        executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<u32> {
+        let setup_bytes = [
+            0xA0, // bmRequestType: Device-to-host, class, device
+            0x00, // bRequest: GET_STATUS
+            0x00, 0x00, // wValue
+            0x00, 0x00, // wIndex
+            0x04, 0x00, // wLength: 4
+        ];
+
+        let mut buffer = memory_pool.alloc_buffer(4).ok_or(UsbError::NoResources)?;
+
+        unsafe {
+            executor.execute_control_transfer(
+                self.address,
+                64, // Control endpoint max packet size
+                &setup_bytes,
+                Some(&mut buffer),
+                Direction::In,
+            )?;
+        }
+
+        buffer.prepare_for_cpu();
+        let status_data = buffer.as_slice();
+        Ok(u32::from_le_bytes([
+            status_data[0],
+            status_data[1],
+            status_data[2],
+            status_data[3],
+        ]))
     }
-    
+
     /// Get port status
-    pub async fn get_port_status(&mut self, port: u8) -> Result<(PortStatus, PortChange)> {
+    pub fn get_port_status(
+        &mut self,
+        port: u8,
+        executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<(PortStatus, PortChange)> {
         if port == 0 || port > self.num_ports {
             return Err(UsbError::InvalidParameter);
         }
-        
-        let setup = SetupPacket {
-            request_type: 0xA3, // Device-to-host, class, other
-            request: 0x00,      // GET_STATUS
-            value: 0,
-            index: port as u16,
-            length: 4,
-        };
-        
-        let mut status_data = [0u8; 4];
-        // Execute control transfer to get port status
-        // This would use the control transfer implementation
-        
+
+        let setup_bytes = [
+            0xA3, // bmRequestType: Device-to-host, class, other
+            0x00, // bRequest: GET_STATUS
+            0x00,
+            0x00, // wValue
+            (port & 0xFF) as u8,
+            (port >> 8) as u8, // wIndex
+            0x04,
+            0x00, // wLength: 4
+        ];
+
+        let mut buffer = memory_pool.alloc_buffer(4).ok_or(UsbError::NoResources)?;
+
+        unsafe {
+            executor.execute_control_transfer(
+                self.address,
+                64,
+                &setup_bytes,
+                Some(&mut buffer),
+                Direction::In,
+            )?;
+        }
+
+        buffer.prepare_for_cpu();
+        let status_data = buffer.as_slice();
+
         let status = u16::from_le_bytes([status_data[0], status_data[1]]);
         let change = u16::from_le_bytes([status_data[2], status_data[3]]);
-        
+
         let port_status = PortStatus::from_raw(status);
         let port_change = PortChange::from_raw(change);
-        
+
         // Cache the status
         self.port_status[(port - 1) as usize] = port_status;
         self.port_changes[(port - 1) as usize] = port_change;
-        
+
         Ok((port_status, port_change))
     }
-    
+
     /// Set port feature
-    pub async fn set_port_feature(&self, port: u8, feature: PortFeature) -> Result<()> {
+    pub fn set_port_feature(
+        &self,
+        port: u8,
+        feature: PortFeature,
+        executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<()> {
         if port == 0 || port > self.num_ports {
             return Err(UsbError::InvalidParameter);
         }
-        
-        let setup = SetupPacket {
-            request_type: 0x23, // Host-to-device, class, other
-            request: 0x03,      // SET_FEATURE
-            value: feature as u16,
-            index: port as u16,
-            length: 0,
-        };
-        
-        // Execute control transfer
-        // This would use the control transfer implementation
-        
+
+        let feature_val = feature as u16;
+        let setup_bytes = [
+            0x23, // bmRequestType: Host-to-device, class, other
+            0x03, // bRequest: SET_FEATURE
+            (feature_val & 0xFF) as u8,
+            (feature_val >> 8) as u8, // wValue
+            (port & 0xFF) as u8,
+            (port >> 8) as u8, // wIndex
+            0x00,
+            0x00, // wLength: 0
+        ];
+
+        unsafe {
+            executor.execute_control_transfer(
+                self.address,
+                64,
+                &setup_bytes,
+                None,
+                Direction::Out,
+            )?;
+        }
+
         Ok(())
     }
-    
+
     /// Clear port feature
-    pub async fn clear_port_feature(&self, port: u8, feature: PortFeature) -> Result<()> {
+    pub fn clear_port_feature(
+        &self,
+        port: u8,
+        feature: PortFeature,
+        executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<()> {
         if port == 0 || port > self.num_ports {
             return Err(UsbError::InvalidParameter);
         }
-        
-        let setup = SetupPacket {
-            request_type: 0x23, // Host-to-device, class, other
-            request: 0x01,      // CLEAR_FEATURE
-            value: feature as u16,
-            index: port as u16,
-            length: 0,
-        };
-        
-        // Execute control transfer
-        // This would use the control transfer implementation
-        
+
+        let feature_val = feature as u16;
+        let setup_bytes = [
+            0x23, // bmRequestType: Host-to-device, class, other
+            0x01, // bRequest: CLEAR_FEATURE
+            (feature_val & 0xFF) as u8,
+            (feature_val >> 8) as u8, // wValue
+            (port & 0xFF) as u8,
+            (port >> 8) as u8, // wIndex
+            0x00,
+            0x00, // wLength: 0
+        ];
+
+        unsafe {
+            executor.execute_control_transfer(
+                self.address,
+                64,
+                &setup_bytes,
+                None,
+                Direction::Out,
+            )?;
+        }
+
         Ok(())
     }
-    
+
     /// Reset port and wait for reset complete
-    pub async fn reset_port(&mut self, port: u8) -> Result<DeviceSpeed> {
-        self.set_port_feature(port, PortFeature::PortReset).await?;
-        
-        // Wait for reset to complete (10-20ms typical)
-        #[cfg(feature = "embassy")]
-        embassy_time::Timer::after_millis(20).await;
-        
+    pub fn reset_port(
+        &mut self,
+        port: u8,
+        executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<DeviceSpeed> {
+        self.set_port_feature(port, PortFeature::PortReset, executor, memory_pool)?;
+
+        // Wait for reset to complete (20ms typical)
+        cortex_m::asm::delay(20 * 600_000); // 20ms @ 600MHz
+
         // Poll for reset complete
         let mut retries = 10;
         loop {
-            let (status, change) = self.get_port_status(port).await?;
-            
+            let (status, change) = self.get_port_status(port, executor, memory_pool)?;
+
             if change.reset {
                 // Reset complete, clear the change bit
-                self.clear_port_feature(port, PortFeature::CPortReset).await?;
+                self.clear_port_feature(port, PortFeature::CPortReset, executor, memory_pool)?;
                 return Ok(status.device_speed());
             }
-            
+
             if retries == 0 {
                 return Err(UsbError::Timeout);
             }
             retries -= 1;
-            
-            #[cfg(feature = "embassy")]
-            embassy_time::Timer::after_millis(10).await;
+
+            cortex_m::asm::delay(10 * 600_000); // 10ms @ 600MHz
         }
     }
-    
+
     /// Check all ports for changes
-    pub async fn poll_port_changes(&mut self) -> Result<Vec<(u8, PortChange)>> {
-        let mut changes = Vec::new();
-        
+    pub fn poll_port_changes(
+        &mut self,
+        executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<heapless::Vec<(u8, PortChange), 8>> {
+        let mut changes = heapless::Vec::new();
+
         for port in 1..=self.num_ports {
-            let (_, change) = self.get_port_status(port).await?;
-            
-            if change.connection || change.enabled || 
-               change.suspended || change.over_current || change.reset {
-                changes.push((port, change));
+            let (_, change) = self.get_port_status(port, executor, memory_pool)?;
+
+            if change.connection
+                || change.enabled
+                || change.suspended
+                || change.over_current
+                || change.reset
+            {
+                let _ = changes.push((port, change));
             }
         }
-        
+
         Ok(changes)
     }
-    
+
     /// Handle port connection change
-    pub async fn handle_port_connection(&mut self, port: u8) -> Result<Option<DeviceSpeed>> {
-        let (status, _) = self.get_port_status(port).await?;
-        
+    pub fn handle_port_connection(
+        &mut self,
+        port: u8,
+        executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<Option<DeviceSpeed>> {
+        let (status, _) = self.get_port_status(port, executor, memory_pool)?;
+
         // Clear connection change bit
-        self.clear_port_feature(port, PortFeature::CPortConnection).await?;
-        
+        self.clear_port_feature(port, PortFeature::CPortConnection, executor, memory_pool)?;
+
         if status.connected {
             // New device connected, perform reset
-            let speed = self.reset_port(port).await?;
-            
+            let speed = self.reset_port(port, executor, memory_pool)?;
+
             #[cfg(feature = "defmt")]
             defmt::info!("Device connected to hub port {}: {:?} speed", port, speed);
-            
+
             Ok(Some(speed))
         } else {
             // Device disconnected
             self.port_devices[(port - 1) as usize] = 0;
-            
+
             #[cfg(feature = "defmt")]
             defmt::info!("Device disconnected from hub port {}", port);
-            
+
             Ok(None)
         }
     }
-    
+
     /// Get Transaction Translator for a port
     pub fn get_tt_for_port(&self, port: u8) -> Option<&TransactionTranslator> {
         if port == 0 || port > self.num_ports {
             return None;
         }
-        
+
         if self.is_multi_tt {
             // Each port has its own TT
             self.transaction_translators[(port - 1) as usize].as_ref()
@@ -602,14 +696,14 @@ impl Hub {
             self.transaction_translators[0].as_ref()
         }
     }
-    
+
     /// Set device address for a port
     pub fn set_port_device(&mut self, port: u8, device_address: u8) {
         if port > 0 && port <= self.num_ports {
             self.port_devices[(port - 1) as usize] = device_address;
         }
     }
-    
+
     /// Get device address for a port
     pub fn get_port_device(&self, port: u8) -> Option<u8> {
         if port > 0 && port <= self.num_ports {
@@ -645,7 +739,7 @@ impl HubManager {
             next_address: AtomicU8::new(2), // Address 1 is reserved
         }
     }
-    
+
     /// Register a new hub
     pub fn register_hub(&mut self, hub: Hub) -> Result<()> {
         // Find free slot matching hub address
@@ -653,27 +747,27 @@ impl HubManager {
         if address >= self.hubs.len() {
             return Err(UsbError::InvalidParameter);
         }
-        
+
         if self.hubs[address].is_some() {
             return Err(UsbError::InvalidState);
         }
-        
+
         self.hubs[address] = Some(hub);
         self.hub_count.fetch_add(1, Ordering::AcqRel);
-        
+
         Ok(())
     }
-    
+
     /// Get hub by address
     pub fn get_hub(&self, address: u8) -> Option<&Hub> {
         self.hubs[address as usize].as_ref()
     }
-    
+
     /// Get mutable hub by address
     pub fn get_hub_mut(&mut self, address: u8) -> Option<&mut Hub> {
         self.hubs[address as usize].as_mut()
     }
-    
+
     /// Allocate next device address
     pub fn allocate_address(&self) -> Result<u8> {
         let addr = self.next_address.fetch_add(1, Ordering::AcqRel);
@@ -683,7 +777,7 @@ impl HubManager {
         }
         Ok(addr)
     }
-    
+
     /// Find Transaction Translator for a device
     pub fn find_tt_for_device(&self, device_address: u8) -> Option<&TransactionTranslator> {
         // Search all hubs for device
@@ -698,39 +792,54 @@ impl HubManager {
         }
         None
     }
-    
+
     /// Poll all hubs for port changes
-    pub async fn poll_all_hubs(&mut self) -> Result<()> {
+    pub fn poll_all_hubs(
+        &mut self,
+        executor: &mut TransferExecutor,
+        memory_pool: &mut UsbMemoryPool,
+    ) -> Result<()> {
         for hub_opt in &mut self.hubs {
             if let Some(hub) = hub_opt {
-                let changes = hub.poll_port_changes().await?;
-                
+                let changes = hub.poll_port_changes(executor, memory_pool)?;
+
                 for (port, change) in changes {
                     if change.connection {
                         // Handle connection change
-                        if let Some(speed) = hub.handle_port_connection(port).await? {
+                        if let Some(speed) =
+                            hub.handle_port_connection(port, executor, memory_pool)?
+                        {
                             // New device connected, enumerate it
                             #[cfg(feature = "defmt")]
-                            defmt::info!("New {:?} speed device on hub {} port {}", 
-                                        speed, hub.address, port);
-                            
+                            defmt::info!(
+                                "New {:?} speed device on hub {} port {}",
+                                speed,
+                                hub.address,
+                                port
+                            );
+
                             // Device enumeration would happen here
                             // This would call into the enumeration module
                         }
                     }
-                    
+
                     // Handle other changes (overcurrent, etc.)
                     if change.over_current {
                         #[cfg(feature = "defmt")]
                         defmt::warn!("Overcurrent on hub {} port {}", hub.address, port);
-                        
+
                         // Disable port for safety
-                        hub.clear_port_feature(port, PortFeature::PortEnable).await?;
+                        hub.clear_port_feature(
+                            port,
+                            PortFeature::PortEnable,
+                            executor,
+                            memory_pool,
+                        )?;
                     }
                 }
             }
         }
-        
+
         Ok(())
     }
 }
@@ -767,12 +876,12 @@ impl SplitTransactionHandler {
             current_frame: AtomicU32::new(0),
         }
     }
-    
+
     /// Update current frame number
     pub fn update_frame(&self, frame: u32) {
         self.current_frame.store(frame, Ordering::Release);
     }
-    
+
     /// Schedule a new split transaction
     pub fn schedule_split(
         &mut self,
@@ -788,35 +897,36 @@ impl SplitTransactionHandler {
             cs_retries: 0,
             start_frame: self.current_frame.load(Ordering::Acquire),
         };
-        
-        self.active_splits.push(split)
+
+        self.active_splits
+            .push(split)
             .map_err(|_| UsbError::NoResources)?;
-        
+
         Ok(())
     }
-    
+
     /// Process split transactions for current microframe
-    pub fn process_microframe(&mut self, microframe: u8) -> Vec<(usize, bool)> {
-        let mut actions = Vec::new();
-        
+    pub fn process_microframe(&mut self, microframe: u8) -> heapless::Vec<(usize, bool), 32> {
+        let mut actions = heapless::Vec::new();
+
         for split in &mut self.active_splits {
             if !split.is_complete_phase {
                 // Check if we should do start-split
                 if (split.timing.start_mask & (1 << microframe)) != 0 {
-                    actions.push((split.qh_index, false)); // Start-split
+                    let _ = actions.push((split.qh_index, false)); // Start-split
                     split.is_complete_phase = true;
                 }
             } else {
                 // Check if we should do complete-split
                 if (split.timing.complete_mask & (1 << microframe)) != 0 {
-                    actions.push((split.qh_index, true)); // Complete-split
+                    let _ = actions.push((split.qh_index, true)); // Complete-split
                 }
             }
         }
-        
+
         actions
     }
-    
+
     /// Handle split transaction completion
     pub fn handle_completion(&mut self, qh_index: usize, success: bool) {
         self.active_splits.retain(|split| {
@@ -843,7 +953,7 @@ impl SplitTransactionHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_port_status_parsing() {
         let status = PortStatus::from_raw(0x0103); // Connected, enabled, power
@@ -851,10 +961,10 @@ mod tests {
         assert!(status.enabled);
         assert!(status.power);
         assert!(!status.suspended);
-        
+
         assert_eq!(status.device_speed(), DeviceSpeed::Full);
     }
-    
+
     #[test]
     fn test_port_change_parsing() {
         let change = PortChange::from_raw(0x0011); // Connection and reset change
@@ -862,7 +972,7 @@ mod tests {
         assert!(change.reset);
         assert!(!change.enabled);
     }
-    
+
     #[test]
     fn test_split_timing() {
         let timing = SplitTiming::control_bulk();

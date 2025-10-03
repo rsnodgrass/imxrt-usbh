@@ -3,11 +3,11 @@
 //! Implements efficient, cache-friendly register access with proper memory ordering
 //! for ARM Cortex-M7 weakly-ordered memory model.
 
-use core::ptr::{read_volatile, write_volatile};
 use core::cell::UnsafeCell;
+use core::ptr::{read_volatile, write_volatile};
 
 /// Optimized register access wrapper with proper memory ordering
-/// 
+///
 /// This provides more efficient register access than AtomicU32 for MMIO operations
 /// while maintaining memory safety through proper barriers.
 #[repr(transparent)]
@@ -25,24 +25,24 @@ impl Register<u32> {
             value: UnsafeCell::new(value),
         }
     }
-    
+
     /// Read register with acquire semantics for status/data reads
     #[inline(always)]
     pub fn read(&self) -> u32 {
-        unsafe { 
+        unsafe {
             cortex_m::asm::dmb(); // Data Memory Barrier before read
             let value = read_volatile(self.value.get());
             cortex_m::asm::dmb(); // Data Memory Barrier after read
             value
         }
     }
-    
+
     /// Read register without barriers for capability registers (read-only, no side effects)
     #[inline(always)]
     pub fn read_relaxed(&self) -> u32 {
         unsafe { read_volatile(self.value.get()) }
     }
-    
+
     /// Write register with release semantics for control writes
     #[inline(always)]
     pub fn write(&self, value: u32) {
@@ -52,11 +52,11 @@ impl Register<u32> {
             cortex_m::asm::dsb(); // Data Synchronization Barrier ensures write completes
         }
     }
-    
+
     /// Read-modify-write operation with full memory barriers
     #[inline(always)]
-    pub fn modify<F>(&self, f: F) 
-    where 
+    pub fn modify<F>(&self, f: F)
+    where
         F: FnOnce(u32) -> u32,
     {
         unsafe {
@@ -67,19 +67,19 @@ impl Register<u32> {
             cortex_m::asm::dsb();
         }
     }
-    
+
     /// Atomic set bits operation
     #[inline(always)]
     pub fn set_bits(&self, mask: u32) {
         self.modify(|v| v | mask);
     }
-    
-    /// Atomic clear bits operation  
+
+    /// Atomic clear bits operation
     #[inline(always)]
     pub fn clear_bits(&self, mask: u32) {
         self.modify(|v| v & !mask);
     }
-    
+
     /// Write-1-to-clear operation for status registers
     #[inline(always)]
     pub fn write_1_to_clear(&self, mask: u32) {
@@ -103,14 +103,19 @@ impl RegisterTimeout {
             timeout_cycles: timeout_us * cycles_per_us,
         }
     }
-    
+
+    /// Create new timeout with duration in milliseconds
+    pub fn new_ms(timeout_ms: u32) -> Self {
+        Self::new_us(timeout_ms * 1000)
+    }
+
     /// Check if timeout has elapsed
     #[inline(always)]
     pub fn is_expired(&self) -> bool {
         let current = cortex_m::peripheral::DWT::cycle_count();
         current.wrapping_sub(self.start_cycles) >= self.timeout_cycles
     }
-    
+
     /// Wait for condition with timeout
     pub fn wait_for<F>(&self, mut condition: F) -> Result<(), crate::error::UsbError>
     where

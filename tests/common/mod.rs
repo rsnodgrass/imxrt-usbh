@@ -9,8 +9,6 @@ pub mod mock_hardware;
 
 // Re-export commonly used items
 pub use mock_hardware::{
-    create_mock_buffer,
+    assert_buffer_aligned, create_mock_buffer, create_test_config_descriptor,
     create_test_device_descriptor,
-    create_test_config_descriptor,
-    assert_buffer_aligned,
 };

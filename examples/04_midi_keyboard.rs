@@ -30,26 +30,26 @@
 #![no_std]
 #![no_main]
 
-use teensy4_bsp as bsp;
 use bsp::board;
-use teensy4_panic as _;
+use embedded_hal::digital::OutputPin;
 use imxrt_ral as ral;
 use log::info;
-use embedded_hal::digital::OutputPin;
+use teensy4_bsp as bsp;
+use teensy4_panic as _;
 
 use imxrt_usbh::{
-    Result,
-    ehci::controller::{EhciController, Uninitialized, Running},
-    phy::UsbPhy,
-    enumeration::{DeviceEnumerator, EnumeratedDevice, DeviceClass},
     dma::UsbMemoryPool,
+    ehci::controller::{EhciController, Running, Uninitialized},
+    enumeration::{DeviceClass, DeviceEnumerator, EnumeratedDevice},
+    phy::UsbPhy,
     transfer::{BulkTransferManager, Direction},
+    Result,
 };
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
 /// i.MX RT1062 Hardware Register Base Addresses
-/// 
+///
 /// These addresses are from the i.MX RT1062 reference manual and are
 /// specific to the Teensy 4.x hardware platform.
 pub mod hardware_addresses {
@@ -59,15 +59,15 @@ pub mod hardware_addresses {
     /// - Transceiver settings for signal levels
     /// - Power management for the USB PHY
     pub const USBPHY1_BASE_ADDRESS: u32 = 0x400D_9000;
-    
+
     /// Clock Control Module (CCM) register base address (Reference Manual Section 14)
     /// Controls all system clocks including:
-    /// - PLL configuration and control  
+    /// - PLL configuration and control
     /// - Clock gating for power management
     /// - Clock dividers and multiplexers
     /// - USB-specific clock routing
     pub const CCM_BASE_ADDRESS: u32 = 0x400F_C000;
-    
+
     /// USB1 Host Controller (EHCI) register base address (Reference Manual Section 15.3)
     /// This is the Enhanced Host Controller Interface for USB 2.0:
     /// - USB transfer scheduling and control
@@ -82,21 +82,24 @@ use hardware_addresses::*;
 
 /// Educational Error Handling Patterns for USB Applications
 ///
-/// This module demonstrates comprehensive error handling strategies for 
+/// This module demonstrates comprehensive error handling strategies for
 /// embedded USB applications, showing when to retry, when to reset, and
 /// when to give up on different types of USB errors.
 pub mod usb_error_handling {
     use imxrt_usbh::UsbError;
-    
+
     /// Recovery action to take for different error conditions
     #[derive(Debug, Clone, Copy, PartialEq)]
     pub enum RecoveryAction {
         /// Retry the operation immediately - for transient errors
         RetryImmediate,
-        /// Retry after a delay - for temporary conditions  
+        /// Retry after a delay - for temporary conditions
         RetryWithDelay { delay_ms: u32 },
         /// Retry with exponential backoff - for congested conditions
-        RetryWithBackoff { base_delay_ms: u32, max_attempts: u8 },
+        RetryWithBackoff {
+            base_delay_ms: u32,
+            max_attempts: u8,
+        },
         /// Reset the device - for protocol errors
         ResetDevice,
         /// Remove device from system - for permanent failures
@@ -104,13 +107,12 @@ pub mod usb_error_handling {
         /// Fatal error - cannot recover
         Fatal,
     }
-    
+
     /// Analyze USB error and determine appropriate recovery strategy
-    /// 
+    ///
     /// This educational function shows how to categorize USB errors and
     /// choose appropriate recovery mechanisms based on the error type.
     pub fn analyze_usb_error(error: &UsbError, attempt_count: u8) -> RecoveryAction {
-        
         match error {
             // Transient errors - can retry immediately a few times
             UsbError::Timeout => {
@@ -121,54 +123,50 @@ pub mod usb_error_handling {
                     RecoveryAction::RetryWithDelay { delay_ms: 100 }
                 }
             }
-            
+
             // Device temporarily unavailable - retry with backoff
             UsbError::Nak => {
                 if attempt_count < 5 {
-                    RecoveryAction::RetryWithBackoff { 
-                        base_delay_ms: 10, 
-                        max_attempts: 5 
+                    RecoveryAction::RetryWithBackoff {
+                        base_delay_ms: 10,
+                        max_attempts: 5,
                     }
                 } else {
                     RecoveryAction::RetryWithDelay { delay_ms: 100 }
                 }
             }
-            
+
             // Transaction errors - retry with backoff
             UsbError::TransactionError => {
                 if attempt_count < 5 {
-                    RecoveryAction::RetryWithBackoff { 
-                        base_delay_ms: 50, 
-                        max_attempts: 5 
+                    RecoveryAction::RetryWithBackoff {
+                        base_delay_ms: 50,
+                        max_attempts: 5,
                     }
                 } else {
                     // Device may be malfunctioning
                     RecoveryAction::ResetDevice
                 }
             }
-            
+
             // Stall condition - need endpoint clear
-            UsbError::Stall => {
-                RecoveryAction::ResetDevice
-            }
-            
+            UsbError::Stall => RecoveryAction::ResetDevice,
+
             // Invalid descriptors - device configuration issue
-            UsbError::InvalidDescriptor => {
-                RecoveryAction::RemoveDevice
-            }
-            
+            UsbError::InvalidDescriptor => RecoveryAction::RemoveDevice,
+
             // Device doesn't support required feature - permanent failure
             UsbError::Unsupported => RecoveryAction::RemoveDevice,
-            
+
             // Hardware or system failures - cannot recover
             UsbError::HardwareFailure => RecoveryAction::Fatal,
-            
+
             // Port errors - physical issues
             UsbError::PortError => RecoveryAction::ResetDevice,
-            
+
             // Device disconnection - remove immediately
             UsbError::DeviceDisconnected => RecoveryAction::RemoveDevice,
-            
+
             // Resource exhaustion - retry after delay
             UsbError::NoResources => {
                 if attempt_count < 3 {
@@ -177,57 +175,61 @@ pub mod usb_error_handling {
                     RecoveryAction::Fatal
                 }
             }
-            
+
             // Programming errors - non-recoverable
-            UsbError::InvalidParameter | UsbError::InvalidState => {
-                RecoveryAction::Fatal
-            }
-            
+            UsbError::InvalidParameter | UsbError::InvalidState => RecoveryAction::Fatal,
+
             // Buffer issues - non-recoverable for this transfer
             UsbError::BufferOverflow => RecoveryAction::RemoveDevice,
-            
+
             // Initialization errors - shouldn't happen during operation
             UsbError::AlreadyInitialized => RecoveryAction::Fatal,
         }
     }
-    
+
     /// Execute recovery action with proper educational logging
-    pub fn execute_recovery(action: RecoveryAction, _device_info: &str) -> Result<(), &'static str> {
+    pub fn execute_recovery(
+        action: RecoveryAction,
+        _device_info: &str,
+    ) -> Result<(), &'static str> {
         match action {
             RecoveryAction::RetryImmediate => {
                 // Educational: Log that we're retrying immediately
                 // In production: log::info!("Retrying USB operation for {}", device_info);
                 Ok(())
             }
-            
+
             RecoveryAction::RetryWithDelay { delay_ms } => {
                 // Educational: Show delay implementation
                 delay_ms_educational(delay_ms);
                 // In production: log::warn!("Retrying after {}ms delay for {}", delay_ms, device_info);
                 Ok(())
             }
-            
-            RecoveryAction::RetryWithBackoff { base_delay_ms, max_attempts: _ } => {
+
+            RecoveryAction::RetryWithBackoff {
+                base_delay_ms,
+                max_attempts: _,
+            } => {
                 // Educational: Exponential backoff calculation
                 let delay = base_delay_ms * 2; // Simple backoff for demonstration
                 delay_ms_educational(delay);
                 Ok(())
             }
-            
+
             RecoveryAction::ResetDevice => {
                 // Educational: Device reset would go here
                 // In production: perform device reset sequence
                 // log::error!("Resetting device: {}", device_info);
                 Ok(())
             }
-            
+
             RecoveryAction::RemoveDevice => {
                 // Educational: Device cleanup would go here
                 // In production: clean up device resources and notify system
                 // log::error!("Removing device: {}", device_info);
                 Err("Device removed")
             }
-            
+
             RecoveryAction::Fatal => {
                 // Educational: System-level error handling
                 // In production: might trigger system reset or error reporting
@@ -236,15 +238,15 @@ pub mod usb_error_handling {
             }
         }
     }
-    
+
     /// Educational delay function (replace with actual timer in production)
     fn delay_ms_educational(ms: u32) {
         // In production, use proper timer or async delay
         cortex_m::asm::delay(600_000 * ms); // Rough approximation for 600MHz
     }
-    
+
     /// Comprehensive error handling wrapper for USB operations
-    /// 
+    ///
     /// This demonstrates how to wrap USB operations with automatic
     /// retry logic and appropriate error recovery.
     pub fn with_retry<F, R>(
@@ -256,28 +258,28 @@ pub mod usb_error_handling {
         F: FnMut() -> Result<R, UsbError>,
     {
         let mut attempt = 0;
-        
+
         loop {
             attempt += 1;
-            
+
             match operation() {
                 Ok(result) => return Ok(result),
                 Err(error) => {
                     // Analyze error and determine recovery strategy
                     let recovery = analyze_usb_error(&error, attempt);
-                    
+
                     // Educational logging
-                    // In production: log::debug!("USB error in {}: {:?}, attempt {}/{}", 
+                    // In production: log::debug!("USB error in {}: {:?}, attempt {}/{}",
                     //                           operation_name, error, attempt, max_attempts);
-                    
+
                     // Check if we've exceeded maximum attempts
                     if attempt >= max_attempts {
                         return Err("Max retry attempts exceeded");
                     }
-                    
+
                     // Execute recovery action
                     match execute_recovery(recovery, operation_name) {
-                        Ok(()) => continue, // Retry the operation
+                        Ok(()) => continue,          // Retry the operation
                         Err(msg) => return Err(msg), // Cannot recover
                     }
                 }
@@ -292,78 +294,78 @@ pub mod usb_error_handling {
 /// The ARM Cortex-M7 has separate instruction and data caches that can
 /// cause coherency issues with DMA operations if not managed properly.
 pub mod cache_coherency {
-    use cortex_m::asm::{dsb, dmb};
-    
+    use cortex_m::asm::{dmb, dsb};
+
     /// Prepare buffer for DMA write operation (CPU → USB peripheral)
-    /// 
+    ///
     /// This ensures the USB controller sees all CPU writes by cleaning
     /// (flushing) the data cache lines containing the buffer.
-    /// 
+    ///
     /// Call this before starting a USB OUT transfer (host to device).
     pub fn prepare_dma_write_buffer(buffer: &[u8]) {
         let _start_addr = buffer.as_ptr() as u32;
         let _length = buffer.len();
-        
+
         // Data Synchronization Barrier - ensure all CPU writes complete
         dsb();
-        
+
         // Clean D-cache for the buffer range to ensure DMA sees CPU data
         // In production: SCB::clean_dcache_by_address(start_addr, length);
         // For educational purposes, we document the requirement
-        
+
         // Memory barrier to ensure cache operations complete before DMA
         dmb();
     }
-    
+
     /// Process buffer after DMA read operation (USB peripheral → CPU)
-    /// 
+    ///
     /// This ensures the CPU sees all USB controller writes by invalidating
     /// the data cache lines, forcing the CPU to read from main memory.
-    /// 
+    ///
     /// Call this after completing a USB IN transfer (device to host).
     pub fn process_dma_read_buffer(buffer: &mut [u8]) {
         let _start_addr = buffer.as_ptr() as u32;
         let _length = buffer.len();
-        
+
         // Data Synchronization Barrier - ensure DMA transfer completes
         dsb();
-        
+
         // Invalidate D-cache for the buffer range to ensure CPU sees DMA data
         // In production: SCB::invalidate_dcache_by_address(start_addr, length);
         // For educational purposes, we document the requirement
-        
+
         // Memory barrier to ensure cache operations complete
         dmb();
     }
-    
+
     /// Comprehensive cache management for bidirectional DMA buffer
-    /// 
+    ///
     /// Use this for buffers that will be both read and written by DMA operations.
     /// This performs both clean and invalidate operations.
     pub fn prepare_bidirectional_dma_buffer(buffer: &mut [u8]) {
         let _start_addr = buffer.as_ptr() as u32;
         let _length = buffer.len();
-        
+
         dsb();
-        
+
         // Clean and invalidate D-cache for complete coherency
         // In production: SCB::clean_invalidate_dcache_by_address(start_addr, length);
-        
+
         dmb();
     }
-    
+
     /// Educational note on cache alignment requirements
-    /// 
+    ///
     /// ARM Cortex-M7 cache lines are 32 bytes. For optimal performance,
     /// DMA buffers should be aligned to 32-byte boundaries and sized
     /// in multiples of 32 bytes to avoid partial cache line issues.
     pub const CACHE_LINE_SIZE: usize = 32;
-    
+
     /// Check if buffer is properly aligned for optimal cache performance
     pub fn is_cache_aligned(buffer: &[u8]) -> bool {
         let addr = buffer.as_ptr() as usize;
         let len = buffer.len();
-        
+
         // Check both address alignment and length alignment
         (addr % CACHE_LINE_SIZE == 0) && (len % CACHE_LINE_SIZE == 0)
     }
@@ -376,13 +378,13 @@ pub mod cache_coherency {
 /// 5V power that USB devices require.
 pub mod vbus_power_control {
     /// Configure VBUS switching circuit for USB host mode
-    /// 
+    ///
     /// Recommended circuit:
     /// - Use P-channel MOSFET for high-side switching (e.g., IRF9540)
     /// - GPIO pin controls MOSFET gate through pullup resistor
     /// - Add current limiting resistor or PTC fuse (500mA for USB 2.0)
     /// - Include TVS diode for overvoltage protection
-    /// 
+    ///
     /// Teensy 4.x Pin Connections:
     /// - GPIO pin (e.g., Digital Pin 2) → MOSFET gate control
     /// - MOSFET source → +5V supply
@@ -394,42 +396,42 @@ pub mod vbus_power_control {
         // 1. Configure GPIO pin as output
         // 2. Set appropriate drive strength
         // 3. Initialize to VBUS OFF state for safety
-        
+
         // Educational note: This is hardware-dependent
         // Actual implementation depends on your specific GPIO library
     }
-    
+
     /// Enable VBUS power to connected USB device
-    /// 
+    ///
     /// Call this after detecting device connection but before enumeration.
     /// USB devices need power before they can respond to enumeration requests.
     pub fn enable_vbus_power() {
         // Set GPIO pin LOW to turn on P-channel MOSFET
         // (P-channel MOSFETs are ON when gate is pulled low)
-        
+
         // Educational note: Always implement proper sequencing:
         // 1. Enable VBUS power
         // 2. Wait for power stabilization (typically 100ms)
         // 3. Begin USB enumeration sequence
     }
-    
+
     /// Disable VBUS power to connected USB device
-    /// 
+    ///
     /// Call this when device is disconnected or during error conditions.
     /// This ensures proper power cycling for device recovery.
     pub fn disable_vbus_power() {
         // Set GPIO pin HIGH to turn off P-channel MOSFET
         // This removes power from the USB device
-        
+
         // Educational note: Important for:
         // - Device removal detection
-        // - Error recovery sequences  
+        // - Error recovery sequences
         // - Power management
         // - Safety during faults
     }
-    
+
     /// Monitor VBUS current for overcurrent protection
-    /// 
+    ///
     /// USB 2.0 specification allows maximum 500mA per device.
     /// Monitoring helps detect faulty devices and protect the host.
     pub fn check_vbus_current() -> VbusStatus {
@@ -437,11 +439,11 @@ pub mod vbus_power_control {
         // 1. Read current sensor (e.g., INA219)
         // 2. Compare against USB current limits
         // 3. Trigger overcurrent protection if needed
-        
+
         // For educational purposes, return a status enum
         VbusStatus::Normal
     }
-    
+
     /// VBUS monitoring status for educational purposes
     #[derive(Debug, Clone, Copy, PartialEq)]
     pub enum VbusStatus {
@@ -488,11 +490,29 @@ impl MidiMessageType {
 /// MIDI Event
 #[derive(Debug, Clone, Copy)]
 pub enum MidiEvent {
-    NoteOn { channel: u8, note: u8, velocity: u8 },
-    NoteOff { channel: u8, note: u8, velocity: u8 },
-    ControlChange { channel: u8, controller: u8, value: u8 },
-    PitchBend { channel: u8, value: u16 },
-    ProgramChange { channel: u8, program: u8 },
+    NoteOn {
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    },
+    ControlChange {
+        channel: u8,
+        controller: u8,
+        value: u8,
+    },
+    PitchBend {
+        channel: u8,
+        value: u16,
+    },
+    ProgramChange {
+        channel: u8,
+        program: u8,
+    },
 }
 
 impl MidiEvent {
@@ -500,26 +520,38 @@ impl MidiEvent {
     fn from_usb_midi_packet(packet: &[u8; 4]) -> Option<Self> {
         let _cable_number = (packet[0] >> 4) & 0x0F;
         let code_index = packet[0] & 0x0F;
-        
+
         match code_index {
             0x8 => {
                 // Note Off
                 let channel = packet[1] & 0x0F;
                 let note = packet[2] & 0x7F;
                 let velocity = packet[3] & 0x7F;
-                Some(MidiEvent::NoteOff { channel, note, velocity })
+                Some(MidiEvent::NoteOff {
+                    channel,
+                    note,
+                    velocity,
+                })
             }
             0x9 => {
                 // Note On
                 let channel = packet[1] & 0x0F;
                 let note = packet[2] & 0x7F;
                 let velocity = packet[3] & 0x7F;
-                
+
                 // Velocity 0 is actually Note Off
                 if velocity == 0 {
-                    Some(MidiEvent::NoteOff { channel, note, velocity })
+                    Some(MidiEvent::NoteOff {
+                        channel,
+                        note,
+                        velocity,
+                    })
                 } else {
-                    Some(MidiEvent::NoteOn { channel, note, velocity })
+                    Some(MidiEvent::NoteOn {
+                        channel,
+                        note,
+                        velocity,
+                    })
                 }
             }
             0xB => {
@@ -527,7 +559,11 @@ impl MidiEvent {
                 let channel = packet[1] & 0x0F;
                 let controller = packet[2] & 0x7F;
                 let value = packet[3] & 0x7F;
-                Some(MidiEvent::ControlChange { channel, controller, value })
+                Some(MidiEvent::ControlChange {
+                    channel,
+                    controller,
+                    value,
+                })
             }
             0xE => {
                 // Pitch Bend
@@ -546,15 +582,15 @@ impl MidiEvent {
             _ => None,
         }
     }
-    
+
     /// Get MIDI note name from note number
     fn note_name(note: u8) -> &'static str {
         const NOTES: &[&str] = &[
-            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
         ];
         NOTES[(note % 12) as usize]
     }
-    
+
     /// Get octave from note number
     fn note_octave(note: u8) -> i8 {
         (note / 12) as i8 - 1
@@ -579,23 +615,23 @@ impl MidiStats {
             parse_errors: AtomicU32::new(0),
         }
     }
-    
+
     fn note_played(&self) {
         self.notes_played.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn control_change(&self) {
         self.control_changes.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn packet_received(&self) {
         self.packets_received.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn parse_error(&self) {
         self.parse_errors.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     fn get_stats(&self) -> (u32, u32, u32, u32) {
         (
             self.notes_played.load(Ordering::Relaxed),
@@ -605,6 +641,8 @@ impl MidiStats {
         )
     }
 }
+
+use imxrt_usbh::ehci::TransferExecutor;
 
 /// MIDI Device state
 struct MidiDevice {
@@ -620,14 +658,14 @@ impl MidiDevice {
     fn new(device_info: EnumeratedDevice) -> Self {
         Self {
             device_info,
-            interface: 0,  // Typically interface 1 for MIDI streaming
-            bulk_in_endpoint: 0x81, // Endpoint 1 IN
+            interface: 0,            // Typically interface 1 for MIDI streaming
+            bulk_in_endpoint: 0x81,  // Endpoint 1 IN
             bulk_out_endpoint: 0x01, // Endpoint 1 OUT
-            max_packet_size: 64,    // Typical for MIDI USB devices
+            max_packet_size: 64,     // Typical for MIDI USB devices
             is_initialized: false,
         }
     }
-    
+
     /// Initialize MIDI device (set up endpoints, etc.)
     fn initialize(&mut self, _memory_pool: &mut UsbMemoryPool) -> Result<()> {
         // In a full implementation, we would:
@@ -645,6 +683,7 @@ impl MidiDevice {
 struct MidiApp {
     usb_controller: EhciController<8, Running>,
     memory_pool: UsbMemoryPool,
+    transfer_executor: TransferExecutor,
     midi_device: Option<MidiDevice>,
     stats: MidiStats,
     tick_counter: u32,
@@ -666,18 +705,19 @@ impl MidiApp {
         let memory_pool = UsbMemoryPool::new();
 
         // Initialize USB PHY with documented register addresses
-        let phy_base = USBPHY1_BASE_ADDRESS as usize;   // USB PHY1 register base
-        let ccm_base = CCM_BASE_ADDRESS as usize;       // Clock Control Module base
+        let phy_base = USBPHY1_BASE_ADDRESS as usize; // USB PHY1 register base
+        let ccm_base = CCM_BASE_ADDRESS as usize; // Clock Control Module base
         let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 
         // Initialize USB host controller with documented register address
         let usb1_base = USB1_HOST_BASE_ADDRESS as usize; // EHCI controller registers
-        let controller = unsafe {
-            EhciController::<8, Uninitialized>::new(usb1_base)?
-        };
+        let controller = unsafe { EhciController::<8, Uninitialized>::new(usb1_base)? };
 
         let controller = unsafe { controller.initialize()? };
         let usb_controller = unsafe { controller.start() };
+
+        // Initialize transfer executor
+        let transfer_executor = unsafe { TransferExecutor::new(usb1_base) };
 
         info!("USB host initialized successfully");
         info!("Waiting for MIDI keyboard...\r\n");
@@ -685,6 +725,7 @@ impl MidiApp {
         Ok(Self {
             usb_controller,
             memory_pool,
+            transfer_executor,
             midi_device: None,
             stats: MidiStats::new(),
             tick_counter: 0,
@@ -693,7 +734,7 @@ impl MidiApp {
             midi_transfer_id: None,
         })
     }
-    
+
     /// Try to detect and enumerate a MIDI device
     fn detect_midi_device(&mut self) {
         if self.midi_device.is_some() {
@@ -701,7 +742,11 @@ impl MidiApp {
         }
 
         // Try to enumerate a MIDI device
-        match find_midi_device(&mut self.usb_controller, &mut self.memory_pool) {
+        match find_midi_device(
+            &mut self.usb_controller,
+            &mut self.memory_pool,
+            &mut self.transfer_executor,
+        ) {
             Ok(mut device) => {
                 if device.initialize(&mut self.memory_pool).is_ok() {
                     info!("MIDI keyboard detected and initialized!");
@@ -739,19 +784,22 @@ impl MidiApp {
             }
         }
     }
-    
+
     /// Process MIDI data from connected device
     fn process_midi_data(&mut self) {
         // Extract device parameters before taking mutable references
-        let (device_addr, endpoint, max_packet_size) =
-            if let Some(ref device) = self.midi_device {
-                if !device.is_initialized {
-                    return;
-                }
-                (device.device_info.address, device.bulk_in_endpoint, device.max_packet_size)
-            } else {
+        let (device_addr, endpoint, max_packet_size) = if let Some(ref device) = self.midi_device {
+            if !device.is_initialized {
                 return;
-            };
+            }
+            (
+                device.device_info.address,
+                device.bulk_in_endpoint,
+                device.max_packet_size,
+            )
+        } else {
+            return;
+        };
 
         // Poll bulk transfer for MIDI data
         if let Some(transfer_id) = self.midi_transfer_id {
@@ -844,31 +892,55 @@ impl MidiApp {
             }
         }
     }
-    
+
     /// Handle a parsed MIDI event
     fn handle_midi_event(&mut self, event: MidiEvent) {
         match event {
-            MidiEvent::NoteOn { channel, note, velocity } => {
+            MidiEvent::NoteOn {
+                channel,
+                note,
+                velocity,
+            } => {
                 self.stats.note_played();
                 self.led_blink_counter = 50; // Blink LED rapidly for 50ms
 
                 let note_name = MidiEvent::note_name(note);
                 let octave = MidiEvent::note_octave(note);
-                info!("♪ Note ON:  {} {} (ch{}, vel{})", note_name, octave, channel + 1, velocity);
+                info!(
+                    "♪ Note ON:  {} {} (ch{}, vel{})",
+                    note_name,
+                    octave,
+                    channel + 1,
+                    velocity
+                );
 
                 // TODO: In a real application, you would:
                 // - Trigger synthesizer
                 // - Send to DAW over USB/MIDI
                 // - Update display or other visual feedback
             }
-            MidiEvent::NoteOff { channel, note, velocity } => {
+            MidiEvent::NoteOff {
+                channel,
+                note,
+                velocity,
+            } => {
                 self.led_blink_counter = 10; // Blink LED slowly for 10ms
 
                 let note_name = MidiEvent::note_name(note);
                 let octave = MidiEvent::note_octave(note);
-                info!("♪ Note OFF: {} {} (ch{}, vel{})", note_name, octave, channel + 1, velocity);
+                info!(
+                    "♪ Note OFF: {} {} (ch{}, vel{})",
+                    note_name,
+                    octave,
+                    channel + 1,
+                    velocity
+                );
             }
-            MidiEvent::ControlChange { channel, controller, value } => {
+            MidiEvent::ControlChange {
+                channel,
+                controller,
+                value,
+            } => {
                 self.stats.control_change();
 
                 // Handle CC messages (volume, pan, modulation, etc.)
@@ -880,7 +952,13 @@ impl MidiApp {
                     64 => "Sustain Pedal",
                     _ => "Unknown CC",
                 };
-                info!("🎛️  CC: {} ({}={}) on ch{}", cc_name, controller, value, channel + 1);
+                info!(
+                    "🎛️  CC: {} ({}={}) on ch{}",
+                    cc_name,
+                    controller,
+                    value,
+                    channel + 1
+                );
             }
             MidiEvent::PitchBend { channel, value } => {
                 info!("🎸 Pitch Bend: {} on ch{}", value, channel + 1);
@@ -890,7 +968,7 @@ impl MidiApp {
             }
         }
     }
-    
+
     /// Update status and statistics
     fn update_status(&mut self) {
         self.tick_counter += 1;
@@ -903,8 +981,10 @@ impl MidiApp {
         // Every 5000 ticks (~5 seconds), report statistics
         if self.tick_counter % 5000 == 0 && self.midi_device.is_some() {
             let (notes, ccs, packets, errors) = self.stats.get_stats();
-            info!("\r\n📊 Stats: {} notes, {} CCs, {} packets, {} errors",
-                  notes, ccs, packets, errors);
+            info!(
+                "\r\n📊 Stats: {} notes, {} CCs, {} packets, {} errors",
+                notes, ccs, packets, errors
+            );
         }
     }
 }
@@ -920,10 +1000,7 @@ fn main() -> ! {
 
     let mut led = board::led(&mut gpio2, pins.p13);
 
-    let mut poller = imxrt_log::log::usbd(
-        usb,
-        imxrt_log::Interrupts::Enabled,
-    ).unwrap();
+    let mut poller = imxrt_log::log::usbd(usb, imxrt_log::Interrupts::Enabled).unwrap();
 
     poller.poll();
 
@@ -952,21 +1029,21 @@ fn main() -> ! {
     }
 }
 
-
 /// Find and enumerate a MIDI device
 fn find_midi_device(
     controller: &mut EhciController<8, Running>,
     memory_pool: &mut UsbMemoryPool,
+    transfer_executor: &mut TransferExecutor,
 ) -> Result<MidiDevice> {
     // Enumerate device
-    let mut enumerator = DeviceEnumerator::new(controller, memory_pool);
+    let mut enumerator = DeviceEnumerator::new(controller, memory_pool, transfer_executor);
     let device_info = enumerator.enumerate_device()?;
-    
+
     // Check if it's a MIDI device (Audio class with MIDI interface)
     if device_info.class != DeviceClass::Audio {
         return Err(imxrt_usbh::UsbError::Unsupported);
     }
-    
+
     Ok(MidiDevice::new(device_info))
 }
 
@@ -984,14 +1061,14 @@ pub mod usb_clock_values {
     pub mod clock_gate_control {
         /// Clock is OFF in all modes - saves maximum power
         pub const CLOCK_OFF: u32 = 0b00;
-        /// Clock is ON only in CPU RUN mode - automatic power saving  
+        /// Clock is ON only in CPU RUN mode - automatic power saving
         pub const CLOCK_ON_RUN_ONLY: u32 = 0b01;
         /// Clock is ON in RUN and WAIT modes - moderate power saving
         pub const CLOCK_ON_RUN_WAIT: u32 = 0b10;
         /// Clock is ALWAYS ON - maximum performance, highest power
         pub const CLOCK_ALWAYS_ON: u32 = 0b11;
     }
-    
+
     /// USB PLL Control Values
     pub mod pll_control {
         /// PLL Power Control - 1 = powered up, 0 = powered down
@@ -1003,12 +1080,12 @@ pub mod usb_clock_values {
         /// PLL Lock Status - 1 = PLL frequency is locked and stable
         pub const PLL_LOCKED: u32 = 1;
     }
-    
+
     /// Standard USB frequencies as defined by USB 2.0 specification
     pub mod usb_frequencies {
         /// USB 2.0 High-Speed reference clock - exactly 480 MHz
         pub const USB_HS_FREQUENCY_HZ: u32 = 480_000_000;
-        /// USB 2.0 Full-Speed bit clock - exactly 12 MHz  
+        /// USB 2.0 Full-Speed bit clock - exactly 12 MHz
         pub const USB_FS_FREQUENCY_HZ: u32 = 12_000_000;
         /// USB 2.0 Low-Speed bit clock - exactly 1.5 MHz
         pub const USB_LS_FREQUENCY_HZ: u32 = 1_500_000;
@@ -1016,36 +1093,36 @@ pub mod usb_clock_values {
 }
 
 /// Configure USB clocks for i.MX RT1062 (educational example showing register-level setup)
-/// 
+///
 /// This function demonstrates the low-level clock configuration required for USB operation.
 /// In a production system, you might use imxrt-hal's clock management instead.
-/// 
+///
 /// Clock configuration sequence (order is important):
 /// 1. Enable clock gates for USB peripherals
-/// 2. Configure and power up the USB PLL  
+/// 2. Configure and power up the USB PLL
 /// 3. Wait for PLL lock before proceeding
 /// 4. USB controller can now operate reliably
 fn configure_usb_clocks() {
     use ral::{modify_reg, read_reg};
     use usb_clock_values::clock_gate_control::*;
     use usb_clock_values::pll_control::*;
-    
+
     unsafe {
         // Step 1: Enable USB peripheral clock gates
         let ccm = ral::ccm::CCM::instance();
-        
+
         // CCGR6 (Clock Gating Register 6) controls USB-related clocks
         // Setting all USB clocks to ALWAYS_ON for reliable operation
-        modify_reg!(ral::ccm, ccm, CCGR6, 
+        modify_reg!(ral::ccm, ccm, CCGR6,
             CG0: CLOCK_ALWAYS_ON,  // usb_ctrl1_clk - USB controller 1 register access
             CG1: CLOCK_ALWAYS_ON,  // usb_ctrl2_clk - USB controller 2 register access
             CG2: CLOCK_ALWAYS_ON,  // usb_phy1_clk - USB PHY 1 operation clock
             CG3: CLOCK_ALWAYS_ON   // usb_phy2_clk - USB PHY 2 operation clock
         );
-        
+
         // Step 2: Configure USB PHY PLL for 480MHz generation
         let analog = ral::ccm_analog::CCM_ANALOG::instance();
-        
+
         // Power up and configure the USB1 PLL
         // This PLL generates the precise 480MHz clock required for USB 2.0 High-Speed
         modify_reg!(ral::ccm_analog, analog, PLL_USB1,
@@ -1053,7 +1130,7 @@ fn configure_usb_clocks() {
             ENABLE: PLL_OUTPUT_ENABLE,   // Enable PLL clock output
             EN_USB_CLKS: USB_CLOCKS_ENABLE  // Route PLL output to USB clocks
         );
-        
+
         // Step 3: Wait for PLL frequency lock (critical for stability)
         // PLL needs time to stabilize after configuration changes
         let mut pll_lock_timeout = 1000; // Prevent infinite loop in case of hardware issues
@@ -1067,7 +1144,7 @@ fn configure_usb_clocks() {
             // Small delay to avoid excessive register reads
             cortex_m::asm::delay(1000);
         }
-        
+
         // At this point, USB controllers have stable 480MHz reference clock
         // and can begin normal USB operations
     }

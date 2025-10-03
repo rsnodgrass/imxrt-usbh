@@ -3,20 +3,20 @@
 #![warn(missing_docs)]
 
 //! USB Host driver for i.MX RT1062 (Teensy 4.x)
-//! 
+//!
 //! This driver provides USB host functionality for the i.MX RT1062 microcontroller,
 //! specifically targeting Teensy 4.0 and 4.1 boards.
-//! 
+//!
 //! # Learning Path
-//! 
+//!
 //! This is a low-level USB host driver. For learning and getting started:
-//! 
+//!
 //! 1. **Start with examples**: Check the `examples/` directory for educational code
-//! 2. **Understand transfers**: Learn about [`transfer`] modules for different USB transfer types  
+//! 2. **Understand transfers**: Learn about [`transfer`] modules for different USB transfer types
 //! 3. **Advanced control**: Use [`ehci`] module for direct hardware control
-//! 
+//!
 //! # Core Components
-//! 
+//!
 //! - [`ehci`] - EHCI USB host controller interface
 //! - [`phy`] - USB PHY management and calibration
 //! - [`transfer`] - USB transfer types (bulk, interrupt, control, isochronous)
@@ -31,16 +31,16 @@ use defmt as _;
 /// Default is 600MHz. Override with compile-time configuration if needed.
 pub const CPU_FREQ_MHZ: u32 = 600;
 
-pub mod ehci;
-pub mod phy;
 pub mod dma;
+pub mod ehci;
+pub mod enumeration;
 pub mod error;
-pub mod vbus;
-pub mod transfer;
 pub mod perf;
+pub mod phy;
 pub mod recovery;
 pub mod safety;
-pub mod enumeration;
+pub mod transfer;
+pub mod vbus;
 
 #[cfg(feature = "rtic-support")]
 pub mod rtic;
@@ -51,12 +51,10 @@ mod lib_test;
 #[cfg(feature = "hub")]
 pub mod hub;
 
-pub use error::{UsbError, Result};
+pub use error::{Result, UsbError};
 pub use transfer::{
-    BulkTransfer, BulkTransferManager, 
-    InterruptTransfer, InterruptTransferManager,
-    IsochronousTransfer, IsochronousTransferManager, MicroframeTiming,
-    Direction, TransferType
+    BulkTransfer, BulkTransferManager, Direction, InterruptTransfer, InterruptTransferManager,
+    IsochronousTransfer, IsochronousTransferManager, MicroframeTiming, TransferType,
 };
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -71,16 +69,16 @@ pub struct UsbHost {
 
 impl UsbHost {
     /// Initialize the USB host controller
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// This function must only be called once during system initialization.
     /// Caller must ensure exclusive access to USB peripherals.
     pub unsafe fn new() -> Result<Self> {
         if USB_HOST_INITIALIZED.swap(true, Ordering::Acquire) {
             return Err(UsbError::AlreadyInitialized);
         }
-        
+
         Ok(Self { _private: () })
     }
 }

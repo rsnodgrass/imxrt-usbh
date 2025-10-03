@@ -31,12 +31,12 @@
 #![no_main]
 #![no_std]
 
-use teensy4_bsp as bsp;
 use bsp::board;
+use teensy4_bsp as bsp;
 use teensy4_panic as _;
 
-use imxrt_usbh::phy::UsbPhy;
 use imxrt_usbh::ehci::{EhciController, Uninitialized};
+use imxrt_usbh::phy::UsbPhy;
 use log::info;
 
 #[bsp::rt::entry]
@@ -52,10 +52,7 @@ fn main() -> ! {
     let led = board::led(&mut gpio2, pins.p13);
 
     // Set up USB CDC logging on USB1 (micro USB port)
-    let mut poller = imxrt_log::log::usbd(
-        usb,
-        imxrt_log::Interrupts::Enabled,
-    ).unwrap();
+    let mut poller = imxrt_log::log::usbd(usb, imxrt_log::Interrupts::Enabled).unwrap();
 
     info!("\r\n=== USB Host Example 02: EHCI Controller Setup ===");
     poller.poll();
@@ -75,7 +72,7 @@ fn main() -> ! {
         Ok(()) => {
             info!("✓ USB PHY initialized");
             poller.poll();
-        },
+        }
         Err(_) => {
             info!("✗ USB PHY initialization FAILED!");
             poller.poll();
@@ -117,7 +114,7 @@ fn main() -> ! {
                 info!("See full working examples: hid_keyboard.rs, midi_keyboard.rs");
                 poller.poll();
                 controller
-            },
+            }
             Err(_) => {
                 info!("✗ EHCI controller creation FAILED!");
                 poller.poll();

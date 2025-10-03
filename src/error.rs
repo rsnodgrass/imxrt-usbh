@@ -14,13 +14,13 @@ pub enum UsbError {
     AlreadyInitialized,
     /// Hardware failure (PHY/PLL/calibration)
     HardwareFailure,
-    
+
     // Connection errors (recoverable by re-enumeration)
     /// Device disconnected or not responding
     DeviceDisconnected,
     /// Port error or power issue
     PortError,
-    
+
     // Transfer errors (recoverable by retry)
     /// Transfer timeout
     Timeout,
@@ -30,11 +30,11 @@ pub enum UsbError {
     Stall,
     /// Transaction error (CRC, babble, etc)
     TransactionError,
-    
+
     // Resource errors (may recover when resources free)
     /// No available descriptors/buffers
     NoResources,
-    
+
     // Programming errors (non-recoverable)
     /// Invalid parameter or state
     InvalidParameter,
@@ -42,7 +42,7 @@ pub enum UsbError {
     InvalidState,
     /// Unsupported operation
     Unsupported,
-    
+
     // Data errors (non-recoverable for this transfer)
     /// Invalid USB descriptor
     InvalidDescriptor,
@@ -74,27 +74,22 @@ impl fmt::Display for UsbError {
 impl UsbError {
     /// Check if error is recoverable by retry
     pub fn is_retryable(&self) -> bool {
-        matches!(self, 
-            Self::Timeout | 
-            Self::Nak | 
-            Self::TransactionError |
-            Self::NoResources
+        matches!(
+            self,
+            Self::Timeout | Self::Nak | Self::TransactionError | Self::NoResources
         )
     }
-    
+
     /// Check if error requires re-enumeration
     pub fn needs_reenumeration(&self) -> bool {
-        matches!(self,
-            Self::DeviceDisconnected |
-            Self::PortError
-        )
+        matches!(self, Self::DeviceDisconnected | Self::PortError)
     }
-    
+
     /// Check if error requires endpoint clear
     pub fn needs_endpoint_clear(&self) -> bool {
         matches!(self, Self::Stall)
     }
-    
+
     /// Get recommended retry delay in milliseconds
     pub fn retry_delay_ms(&self) -> Option<u32> {
         match self {
@@ -105,147 +100,151 @@ impl UsbError {
             _ => None,
         }
     }
-    
+
     /// Get human-readable description with troubleshooting steps
-    /// 
+    ///
     /// This provides educational context for each error, helping users
     /// understand what went wrong and how to fix it.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```rust
     /// use imxrt_usbh::error::UsbError;
-    /// 
+    ///
     /// let error = UsbError::DeviceDisconnected;
     /// println!("Error: {}", error.description_with_help());
     /// // Prints: "Device disconnected. Check USB cable connection and device power."
     /// ```
     pub fn description_with_help(&self) -> &'static str {
         match self {
-            Self::AlreadyInitialized => 
+            Self::AlreadyInitialized =>
                 "USB controller already initialized. Only one instance allowed at a time.",
-            Self::HardwareFailure => 
+            Self::HardwareFailure =>
                 "USB hardware failure. Check power supply and crystal oscillator. Reset may be required.",
-            Self::DeviceDisconnected => 
+            Self::DeviceDisconnected =>
                 "Device disconnected. Check USB cable connection and device power.",
-            Self::PortError => 
+            Self::PortError =>
                 "USB port error. Device may be drawing too much power or cable is faulty.",
-            Self::Timeout => 
+            Self::Timeout =>
                 "Operation timed out. Device may be unresponsive. Try re-enumeration or check device compatibility.",
-            Self::Nak => 
+            Self::Nak =>
                 "Device sent NAK (not ready). This is normal - the library will retry automatically.",
-            Self::Stall => 
+            Self::Stall =>
                 "Device sent STALL. Feature may be unsupported or endpoint needs to be cleared.",
-            Self::TransactionError => 
+            Self::TransactionError =>
                 "USB transaction error. Check signal integrity - cable may be too long or noisy.",
-            Self::NoResources => 
+            Self::NoResources =>
                 "No available USB resources. Too many devices connected or memory exhausted.",
-            Self::InvalidParameter => 
+            Self::InvalidParameter =>
                 "Invalid parameter. Check endpoint addresses and buffer sizes.",
-            Self::InvalidState => 
+            Self::InvalidState =>
                 "Invalid USB state. Device may need to be re-enumerated.",
-            Self::Unsupported => 
+            Self::Unsupported =>
                 "Unsupported operation. Feature not implemented or device incompatible.",
-            Self::InvalidDescriptor => 
+            Self::InvalidDescriptor =>
                 "Invalid USB descriptor. Device may be faulty or use non-standard descriptors.",
-            Self::BufferOverflow => 
+            Self::BufferOverflow =>
                 "Buffer overflow. Increase buffer size or check device documentation for data sizes.",
         }
     }
-    
+
     /// Get the error category for organizational purposes
-    /// 
+    ///
     /// This helps classify errors by their nature, which is useful for
     /// error handling strategies and debugging.
     pub fn category(&self) -> ErrorCategory {
         match self {
             Self::AlreadyInitialized | Self::HardwareFailure => ErrorCategory::Initialization,
             Self::DeviceDisconnected | Self::PortError => ErrorCategory::Connection,
-            Self::Timeout | Self::Nak | Self::Stall | Self::TransactionError => ErrorCategory::Transfer,
+            Self::Timeout | Self::Nak | Self::Stall | Self::TransactionError => {
+                ErrorCategory::Transfer
+            }
             Self::NoResources => ErrorCategory::Resource,
-            Self::InvalidParameter | Self::InvalidState | Self::Unsupported => ErrorCategory::Programming,
+            Self::InvalidParameter | Self::InvalidState | Self::Unsupported => {
+                ErrorCategory::Programming
+            }
             Self::InvalidDescriptor | Self::BufferOverflow => ErrorCategory::Data,
         }
     }
-    
+
     /// Get suggested next steps for error resolution
-    /// 
+    ///
     /// This provides concrete actions a user can take to resolve or work around the error.
     pub fn suggested_actions(&self) -> &'static [&'static str] {
         match self {
             Self::AlreadyInitialized => &[
                 "Ensure only one SimpleUsbHost instance exists",
-                "Check if USB was already initialized elsewhere in your code"
+                "Check if USB was already initialized elsewhere in your code",
             ],
             Self::HardwareFailure => &[
                 "Check 5V power supply stability",
                 "Verify USB host cable is connected to Teensy pins 30/31",
                 "Reset the Teensy board",
-                "Check for hardware damage"
+                "Check for hardware damage",
             ],
             Self::DeviceDisconnected => &[
                 "Check USB cable connection",
                 "Verify device is powered on",
                 "Try a different USB cable",
-                "Check if device is compatible with USB 2.0"
+                "Check if device is compatible with USB 2.0",
             ],
             Self::PortError => &[
                 "Check if device is drawing too much power (>500mA)",
                 "Try a different USB cable",
-                "Verify VBUS power switching circuit"
+                "Verify VBUS power switching circuit",
             ],
             Self::Timeout => &[
                 "Try re-enumerating the device",
                 "Check device compatibility",
                 "Increase timeout values if using low-level API",
-                "Verify device is responding to other requests"
+                "Verify device is responding to other requests",
             ],
             Self::Nak => &[
                 "This is normal - device is busy",
                 "Library will retry automatically",
-                "If persistent, check device documentation"
+                "If persistent, check device documentation",
             ],
             Self::Stall => &[
                 "Check if endpoint/feature is supported",
                 "Consult device documentation",
                 "Try clearing the endpoint halt condition",
-                "Verify request parameters are correct"
+                "Verify request parameters are correct",
             ],
             Self::TransactionError => &[
                 "Check USB cable quality and length",
                 "Reduce electromagnetic interference",
                 "Verify signal integrity",
-                "Try a different USB port or cable"
+                "Try a different USB port or cable",
             ],
             Self::NoResources => &[
                 "Disconnect unused devices",
                 "Reduce number of concurrent transfers",
-                "Check for memory leaks in your code"
+                "Check for memory leaks in your code",
             ],
             Self::InvalidParameter => &[
                 "Check endpoint addresses (0x81, 0x02, etc.)",
                 "Verify buffer sizes match device requirements",
-                "Consult device documentation for valid parameters"
+                "Consult device documentation for valid parameters",
             ],
             Self::InvalidState => &[
                 "Re-enumerate the device",
                 "Check device state before operations",
-                "Verify initialization sequence was completed"
+                "Verify initialization sequence was completed",
             ],
             Self::Unsupported => &[
                 "Check if feature is implemented in this library version",
                 "Consult device documentation for alternative approaches",
-                "Consider using low-level API if available"
+                "Consider using low-level API if available",
             ],
             Self::InvalidDescriptor => &[
                 "Device may be faulty or non-compliant",
                 "Try a different device for testing",
-                "Check device documentation for known issues"
+                "Check device documentation for known issues",
             ],
             Self::BufferOverflow => &[
                 "Increase buffer size in your code",
                 "Check device documentation for maximum data sizes",
-                "Verify endpoint maximum packet sizes"
+                "Verify endpoint maximum packet sizes",
             ],
         }
     }
