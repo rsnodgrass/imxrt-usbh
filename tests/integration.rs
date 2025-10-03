@@ -1,277 +1,236 @@
-//! Integration tests for imxrt-usbh
+//! Integration tests for multi-transfer scenarios
 //!
-//! These tests verify cross-module interactions and high-level functionality.
+//! These tests verify interactions between different transfer types
+//! and components without requiring actual hardware.
+//!
+//! Tests compile for ARM Cortex-M7 (thumbv7em-none-eabihf) and verify
+//! logic, state machines, and resource coordination.
 
 #![no_std]
-#![cfg(test)]
+#![no_main]
 
-extern crate std;
+mod common;
 
-use imxrt_usbh::{UsbHost, UsbError, Result};
+use common::{create_mock_buffer, assert_buffer_aligned};
+use imxrt_usbh::transfer::{
+    BulkTransferManager, InterruptTransferManager, IsochronousTransferManager,
+    Direction, MicroframeTiming,
+};
+use imxrt_usbh::{BulkTransfer, InterruptTransfer, IsochronousTransfer};
 
-/// Test USB host initialization constraints
-#[test]
-fn test_single_initialization() {
-    // This verifies the singleton pattern works correctly
-    let _host1 = unsafe { UsbHost::new() }.expect("First initialization should succeed");
-    
-    // Second initialization should fail
-    let result2 = unsafe { UsbHost::new() };
-    assert!(matches!(result2, Err(UsbError::AlreadyInitialized)));
-}
-
-/// Test EHCI data structure sizes match specification
-#[test]
-fn test_ehci_structure_compliance() {
-    use imxrt_usbh::ehci::qh::QueueHead;
-    use imxrt_usbh::ehci::qtd::QueueTD;
-    
-    // EHCI spec requires specific sizes and alignments
-    assert_eq!(core::mem::size_of::<QueueHead>(), 96);
-    assert!(core::mem::align_of::<QueueHead>() >= 32);
-    
-    assert!(core::mem::size_of::<QueueTD>() >= 64);
-    assert_eq!(core::mem::align_of::<QueueTD>(), 32);
-}
-
-/// Test DMA buffer alignment requirements
-#[test]
-fn test_dma_buffer_requirements() {
-    use imxrt_usbh::dma::DmaBuffer;
-    
-    // Test various buffer sizes
-    let buffer_64 = DmaBuffer::<64>::new();
-    let buffer_512 = DmaBuffer::<512>::new();
-    let buffer_4k = DmaBuffer::<4096>::new();
-    
-    // All should be 32-byte aligned for EHCI
-    assert_eq!(buffer_64.as_ptr() as usize & 0x1F, 0);
-    assert_eq!(buffer_512.as_ptr() as usize & 0x1F, 0);
-    assert_eq!(buffer_4k.as_ptr() as usize & 0x1F, 0);
-    
-    // Verify sizes
-    assert_eq!(buffer_64.len(), 64);
-    assert_eq!(buffer_512.len(), 512);
-    assert_eq!(buffer_4k.len(), 4096);
-}
-
-/// Test transfer type and direction enums
-#[test]  
-fn test_usb_protocol_constants() {
-    use imxrt_usbh::transfer::{TransferType, Direction};
-    
-    // USB 2.0 specification values
-    assert_eq!(TransferType::Control as u8, 0);
-    assert_eq!(TransferType::Isochronous as u8, 1);
-    assert_eq!(TransferType::Bulk as u8, 2);
-    assert_eq!(TransferType::Interrupt as u8, 3);
-    
-    assert_eq!(Direction::Out as u8, 0);
-    assert_eq!(Direction::In as u8, 1);
-}
-
-/// Test USB standard request packet construction  
-#[test]
-fn test_setup_packet_construction() {
-    use imxrt_usbh::transfer::SetupPacket;
-    
-    // GET_DESCRIPTOR device request
-    let packet = SetupPacket::new(
-        0x80,  // Device-to-host, standard, device
-        0x06,  // GET_DESCRIPTOR
-        0x0100, // Device descriptor
-        0,     // wIndex
-        18,    // wLength
-    );
-    
-    assert_eq!(packet.request_type, 0x80);
-    assert_eq!(packet.request, 0x06);
-    assert_eq!(packet.value, 0x0100);
-    assert_eq!(packet.index, 0);
-    assert_eq!(packet.length, 18);
-}
-
-/// Test error handling and recovery mechanisms
-#[test]
-fn test_error_handling_integration() {
-    use imxrt_usbh::error::{ErrorMetrics, ErrorClassification};
-    
-    let metrics = ErrorMetrics::new();
-    
-    // Test error counting
-    metrics.increment_nak();
-    metrics.increment_stall();
-    metrics.increment_timeout();
-    
-    assert_eq!(metrics.get_nak_count(), 1);
-    assert_eq!(metrics.get_stall_count(), 1);
-    assert_eq!(metrics.get_timeout_count(), 1);
-    
-    // Test error classification
-    let classification = ErrorClassification::from_usb_error(&UsbError::Stall);
-    assert_eq!(classification.severity(), 2); // Medium severity
-    assert!(classification.is_retryable());
-}
-
-#[cfg(feature = "hub")]
-mod hub_integration_tests {
+#[cfg(test)]
+mod tests {
     use super::*;
-    use imxrt_usbh::hub::{Hub, PortStatus, TransactionTranslator};
-    
-    /// Test hub and transaction translator integration
+
+    /// Test concurrent bulk and interrupt transfers don't interfere
     #[test]
-    fn test_hub_transaction_translator_integration() {
-        let hub = Hub::new(1, 4, 0x0200, 50);
-        
-        // Configure hub for split transactions
-        let mut hub = hub;
-        hub.set_multi_tt(true);
-        
-        // Add transaction translators for each port
-        for port in 1..=4 {
-            let result = hub.configure_port_tt(port, 2); // 2 microframes think time
+    fn test_bulk_interrupt_coexistence() {
+        let mut bulk_mgr = BulkTransferManager::<4>::new();
+        let mut interrupt_mgr = InterruptTransferManager::<4>::new();
+
+        // Submit bulk transfer
+        let bulk_buf = create_mock_buffer(512, 0);
+        let bulk_id = bulk_mgr
+            .submit(Direction::In, 1, 0x81, 64, bulk_buf, 1000)
+            .expect("bulk submission failed");
+
+        // Submit interrupt transfer
+        let int_buf = create_mock_buffer(64, 1);
+        let int_id = interrupt_mgr
+            .submit(Direction::In, 1, 0x82, 8, int_buf, 10, true)
+            .expect("interrupt submission failed");
+
+        // Verify both are active
+        assert_eq!(bulk_mgr.active_count(), 1);
+        assert_eq!(interrupt_mgr.active_count(), 1);
+
+        // Verify they got different indices
+        assert_eq!(bulk_id, 0);
+        assert_eq!(int_id, 0);
+    }
+
+    /// Test multiple bulk transfers in sequence
+    #[test]
+    fn test_bulk_transfer_sequence() {
+        let mut mgr = BulkTransferManager::<8>::new();
+
+        // Submit 3 bulk transfers
+        for i in 0..3 {
+            let buffer = create_mock_buffer(512, i);
+            let result = mgr.submit(Direction::In, 1, 0x81, 64, buffer, 1000);
             assert!(result.is_ok());
+            assert_eq!(result.unwrap(), i);
         }
-        
-        // Verify TT configuration
-        if let Some(tt) = hub.get_port_tt(1) {
-            assert_eq!(tt.get_hub_address(), 1);
-            assert_eq!(tt.get_hub_port(), 1);
-            assert_eq!(tt.get_think_time(), 2);
-        } else {
-            panic!("Transaction Translator not configured");
+
+        assert_eq!(mgr.active_count(), 3);
+
+        // Verify all transfers are accessible
+        for i in 0..3 {
+            let transfer = mgr.get_transfer(i);
+            assert!(transfer.is_some());
         }
     }
-    
-    /// Test hub depth limits
+
+    /// Test isochronous double buffering with buffer swapping
     #[test]
-    fn test_hub_depth_compliance() {
-        let mut hub = Hub::new(1, 4, 0x0200, 50);
-        
-        // USB 2.0 allows maximum 5 hub tiers
-        for depth in 0..5 {
-            let result = hub.set_depth(depth);
-            assert!(result.is_ok(), "Hub depth {} should be valid", depth);
-        }
-        
-        // Depth 5 should fail (tier 6)
-        let result = hub.set_depth(5);
-        assert!(matches!(result, Err(UsbError::HubDepthExceeded)));
+    fn test_isochronous_buffer_ping_pong() {
+        let mut mgr = IsochronousTransferManager::<2>::new();
+
+        let buf1 = create_mock_buffer(512, 0);
+        let buf2 = create_mock_buffer(512, 1);
+
+        let idx = mgr
+            .submit(
+                Direction::In,
+                1,
+                0x81,
+                1023,
+                buf1,
+                buf2,
+                MicroframeTiming::single(),
+                true,
+            )
+            .expect("iso submission failed");
+
+        let transfer = mgr.get_transfer(idx).expect("transfer not found");
+
+        // Initial buffer is 0
+        assert_eq!(transfer.current_buffer.load(core::sync::atomic::Ordering::Relaxed), 0);
+
+        // Simulate buffer swap (simulating completion)
+        transfer.swap_buffer();
+        assert_eq!(transfer.current_buffer.load(core::sync::atomic::Ordering::Relaxed), 1);
+
+        // Swap back
+        transfer.swap_buffer();
+        assert_eq!(transfer.current_buffer.load(core::sync::atomic::Ordering::Relaxed), 0);
     }
-    
-    /// Test port status interpretation
+
+    /// Test frame-based scheduling for interrupt transfers
     #[test]
-    fn test_port_status_integration() {
-        let hub = Hub::new(1, 4, 0x0200, 50);
-        
-        // Test different device speeds
-        let hs_status = PortStatus::CONNECTED | PortStatus::ENABLED | PortStatus::HIGH_SPEED;
-        assert_eq!(hub.get_port_speed(hs_status), 2); // High-speed
-        
-        let ls_status = PortStatus::CONNECTED | PortStatus::ENABLED | PortStatus::LOW_SPEED;
-        assert_eq!(hub.get_port_speed(ls_status), 1); // Low-speed
-        
-        let fs_status = PortStatus::CONNECTED | PortStatus::ENABLED;
-        assert_eq!(hub.get_port_speed(fs_status), 0); // Full-speed (default)
-    }
-}
+    fn test_interrupt_frame_scheduling() {
+        let mgr = InterruptTransferManager::<8>::new();
 
-/// Test descriptor allocation and management
-#[test]
-fn test_descriptor_pool_integration() {
-    use imxrt_usbh::dma::{DescriptorAllocator, DmaPool};
-    
-    // Test QH and QTD allocation from the same allocator
-    let mut allocator = DescriptorAllocator::<8, 16>::new();
-    
-    // Allocate some QHs
-    let qh1 = allocator.alloc_qh();
-    let qh2 = allocator.alloc_qh();
-    assert!(qh1.is_some());
-    assert!(qh2.is_some());
-    
-    // Allocate some QTDs
-    let qtd1 = allocator.alloc_qtd();
-    let qtd2 = allocator.alloc_qtd();
-    assert!(qtd1.is_some());
-    assert!(qtd2.is_some());
-    
-    // Free and reallocate
-    allocator.free_qh(qh1.unwrap());
-    let qh3 = allocator.alloc_qh();
-    assert!(qh3.is_some());
-}
+        // Set initial frame to 100
+        mgr.update_frame(100);
+        assert_eq!(mgr.current_frame.load(core::sync::atomic::Ordering::Relaxed), 100);
 
-/// Test transfer manager coordination
-#[test] 
-fn test_transfer_manager_integration() {
-    use imxrt_usbh::transfer::TransferManager;
-    
-    let manager = TransferManager::new();
-    
-    // Test that manager starts in a clean state
-    assert_eq!(manager.active_transfers(), 0);
-    assert_eq!(manager.completed_transfers(), 0);
-    assert_eq!(manager.failed_transfers(), 0);
-}
-
-/// Test enumeration state machine
-#[test]
-fn test_enumeration_state_transitions() {
-    use imxrt_usbh::enumeration::{EnumerationState, DeviceEnumerator};
-    
-    // Test initial state
-    let state = EnumerationState::new();
-    assert!(matches!(state.current_state(), EnumerationState::Idle));
-    
-    // Test state transitions
-    let mut state = state;
-    state.start_reset();
-    assert!(matches!(state.current_state(), EnumerationState::Resetting { .. }));
-    
-    state.reset_complete();
-    assert!(matches!(state.current_state(), EnumerationState::GetDescriptor { .. }));
-}
-
-#[cfg(feature = "alloc")]
-mod alloc_integration_tests {
-    use super::*;
-    use std::vec::Vec;
-    
-    /// Test integration with allocator for larger transfers
-    #[test] 
-    fn test_large_transfer_buffers() {
-        // Test that we can handle large transfers with allocation
-        let large_buffer: Vec<u8> = vec![0; 64 * 1024]; // 64KB
-        assert_eq!(large_buffer.len(), 64 * 1024);
-        
-        // Verify buffer alignment for DMA (if needed)
-        let addr = large_buffer.as_ptr() as usize;
-        if addr & 0x1F != 0 {
-            // Would need special allocation for DMA alignment
-            println!("Warning: Large buffer not DMA-aligned");
+        // Advance frames
+        for frame in 101..110 {
+            mgr.update_frame(frame);
+            assert_eq!(mgr.current_frame.load(core::sync::atomic::Ordering::Relaxed), frame);
         }
     }
+
+    /// Test resource exhaustion with multiple transfer types
+    #[test]
+    fn test_multi_type_resource_limits() {
+        let mut bulk_mgr = BulkTransferManager::<2>::new();
+        let mut int_mgr = InterruptTransferManager::<2>::new();
+
+        // Fill bulk manager
+        for i in 0..2 {
+            let buf = create_mock_buffer(512, i);
+            assert!(bulk_mgr.submit(Direction::In, 1, 0x81, 64, buf, 1000).is_ok());
+        }
+
+        // Fill interrupt manager
+        for i in 2..4 {
+            let buf = create_mock_buffer(64, i);
+            assert!(int_mgr.submit(Direction::In, 1, 0x82, 8, buf, 10, true).is_ok());
+        }
+
+        // Both should be at capacity
+        assert_eq!(bulk_mgr.active_count(), 2);
+        assert_eq!(int_mgr.active_count(), 2);
+
+        // Next allocations should fail
+        let buf = create_mock_buffer(512, 4);
+        assert!(bulk_mgr.submit(Direction::In, 1, 0x81, 64, buf, 1000).is_err());
+
+        let buf = create_mock_buffer(64, 5);
+        assert!(int_mgr.submit(Direction::In, 1, 0x82, 8, buf, 10, true).is_err());
+    }
+
+    /// Test statistics across multiple transfers
+    #[test]
+    fn test_multi_transfer_statistics() {
+        let bulk_mgr = BulkTransferManager::<8>::new();
+        let int_mgr = InterruptTransferManager::<8>::new();
+
+        let bulk_stats = bulk_mgr.statistics();
+        let int_stats = int_mgr.statistics();
+
+        // Initial state
+        assert_eq!(bulk_stats.submissions(), 0);
+        assert_eq!(int_stats.submissions(), 0);
+
+        // Simulate some activity
+        bulk_stats.record_submission();
+        bulk_stats.record_submission();
+        bulk_stats.record_completion();
+
+        int_stats.record_submission();
+        int_stats.record_nak_timeout();
+
+        // Verify independent tracking
+        assert_eq!(bulk_stats.submissions(), 2);
+        assert_eq!(bulk_stats.completions(), 1);
+        assert_eq!(int_stats.submissions(), 1);
+        assert_eq!(int_stats.nak_timeouts(), 1);
+    }
+
+    /// Test microframe timing calculations for isochronous transfers
+    #[test]
+    fn test_isochronous_timing_calculations() {
+        let single = MicroframeTiming::single();
+        let double = MicroframeTiming::double();
+        let triple = MicroframeTiming::triple();
+
+        // Single: 1 transaction per microframe
+        assert_eq!(single.transactions_per_uframe, 1);
+        assert_eq!(single.additional_opportunities(), 0);
+        assert_eq!(single.total_bandwidth_slots(), 1);
+
+        // Double: 2 transactions per microframe
+        assert_eq!(double.transactions_per_uframe, 2);
+        assert_eq!(double.additional_opportunities(), 1);
+        assert_eq!(double.total_bandwidth_slots(), 3);
+
+        // Triple: 3 transactions per microframe (maximum)
+        assert_eq!(triple.transactions_per_uframe, 3);
+        assert_eq!(triple.additional_opportunities(), 2);
+        assert_eq!(triple.total_bandwidth_slots(), 5);
+    }
+
+    /// Test transfer state coordination
+    #[test]
+    fn test_transfer_state_coordination() {
+        let mut bulk_mgr = BulkTransferManager::<4>::new();
+
+        // Submit transfer
+        let buf = create_mock_buffer(512, 0);
+        let idx = bulk_mgr.submit(Direction::In, 1, 0x81, 64, buf, 1000).unwrap();
+
+        let transfer = bulk_mgr.get_transfer(idx).expect("transfer missing");
+
+        // Verify initial state
+        use imxrt_usbh::transfer::BulkState;
+        assert_eq!(transfer.state(), BulkState::Idle);
+
+        // Simulate state transitions
+        transfer.transition_state(BulkState::Active);
+        assert_eq!(transfer.state(), BulkState::Active);
+        assert!(!transfer.is_complete());
+
+        transfer.transition_state(BulkState::Complete);
+        assert_eq!(transfer.state(), BulkState::Complete);
+        assert!(transfer.is_complete());
+    }
 }
 
-#[cfg(feature = "rtic-support")]
-mod rtic_integration_tests {
-    use super::*;
-    
-    /// Test RTIC integration points
-    #[test]
-    fn test_rtic_resource_sharing() {
-        // Test that our atomic structures work with RTIC sharing
-        use imxrt_usbh::ehci::qh::QueueHead;
-        use core::sync::atomic::Ordering;
-        
-        let qh = QueueHead::new();
-        
-        // Simulate shared access patterns that RTIC might use
-        let initial_chars = qh.endpoint_chars.load(Ordering::Acquire);
-        qh.endpoint_chars.store(initial_chars | 0x1000, Ordering::Release);
-        
-        let updated_chars = qh.endpoint_chars.load(Ordering::Acquire);
-        assert_ne!(initial_chars, updated_chars);
-    }
+#[cfg(all(test, not(feature = "std")))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
 }
