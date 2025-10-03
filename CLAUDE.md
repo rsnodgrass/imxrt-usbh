@@ -213,9 +213,57 @@ Examples use USB2 for host functionality, leaving USB1 for CDC serial output.
 
 ## Testing Strategy
 
-- Unit tests in `src/lib_test.rs` (requires `--features std`)
-- Hardware tests via examples (examples/ directory)
-- Examples serve dual purpose: educational + integration tests
+### Test Organization (2025 Rust Best Practices)
+
+```
+tests/
+├── common/
+│   ├── mod.rs              # Test utility exports
+│   └── mock_hardware.rs    # Mock DMA buffers & USB descriptors
+├── integration.rs          # Multi-transfer scenarios (8 tests)
+├── error_handling.rs       # Error recovery (11 tests)
+├── resource_management.rs  # Pool lifecycle (12 tests)
+├── hil.rs                  # Hardware-in-the-loop tests
+├── TESTS_IMPLEMENTED.md    # Test documentation
+└── TESTING_MODEL.md        # Test architecture plan
+```
+
+**Test Types:**
+- **Inline unit tests** (68 tests): In `src/` modules under `#[cfg(test)] mod tests`
+  - Transfer managers (bulk, interrupt, isochronous)
+  - DMA buffer safety and alignment
+  - Descriptor parsing and enumeration
+
+- **Integration tests** (31+ tests): In `tests/` directory
+  - Multi-transfer scenarios and coexistence
+  - Error handling and recovery
+  - Resource pool management
+
+- **Hardware tests**: `tests/hil.rs` with `#[ignore = "requires hardware"]`
+  - Requires actual Teensy 4.1 with connected USB devices
+  - Run with: `cargo test --test hil --features std -- --ignored`
+
+**Critical**: All tests compile for ARM Cortex-M7 (`thumbv7em-none-eabihf`). This library directly accesses i.MX RT1062 hardware registers and cannot run on x86 platforms.
+
+**Running Tests:**
+```bash
+# Build and verify tests compile for ARM target
+cargo test --lib --no-run --target thumbv7em-none-eabihf
+
+# Compile integration tests
+cargo test --test integration --no-run --target thumbv7em-none-eabihf
+cargo test --test error_handling --no-run --target thumbv7em-none-eabihf
+cargo test --test resource_management --no-run --target thumbv7em-none-eabihf
+
+# Run hardware tests on device (requires test runner on Teensy)
+cargo test --test hil --features std --target thumbv7em-none-eabihf -- --ignored
+```
+
+**Test Utilities:**
+- Mock DMA buffers using static arrays with `NonNull<u8>`
+- USB descriptor builders (device, config, HID, MIDI)
+- Alignment and overlap assertion helpers
+- All tests use `#![no_std]` and `#![no_main]` with panic handlers
 
 ## Common Patterns
 
