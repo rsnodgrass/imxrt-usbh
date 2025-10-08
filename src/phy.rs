@@ -351,16 +351,11 @@ impl UsbPhy {
         }
     }
 
-    /// Enable USB PHY interrupts
-    pub fn enable_interrupts(&mut self) {
-        unsafe {
-            let ctrl_reg = (self.phy_base + 0x00) as *mut u32;
-            let mut ctrl = core::ptr::read_volatile(ctrl_reg);
-            ctrl |= USBPHY_CTRL_HOSTDISCONDETECT_IRQ;
-            core::ptr::write_volatile(ctrl_reg, ctrl);
-        }
-    }
 }
+
+// Note: enable_interrupts() method was removed - it was buggy (wrong register offset of 0x00
+// instead of USBPHY_CTRL_OFFSET, missing memory barriers) and functionality is already
+// covered by configure_host_mode() method above.
 
 /// PHY status for health monitoring
 #[derive(Debug, Clone, Copy)]

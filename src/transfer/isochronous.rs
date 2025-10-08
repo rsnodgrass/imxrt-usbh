@@ -82,7 +82,8 @@ pub struct IsochronousTransfer {
     state: AtomicU8,
     /// Transfer direction
     direction: Direction,
-    /// Device address
+    /// Device address (used in defmt logging)
+    #[allow(dead_code)]
     device_address: u8,
     /// Endpoint number (without direction bit)
     endpoint: u8,

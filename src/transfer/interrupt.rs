@@ -214,13 +214,13 @@ impl InterruptTransfer {
         if let Some(ref buffer) = self.data_buffer {
             // Configure qTD for interrupt transfer
             let _buffer_addr = buffer.dma_addr();
-            let transfer_size = self.max_packet_size as u32;
-            let toggle = self.data_toggle.load(Ordering::Acquire);
+            let _transfer_size = self.max_packet_size as u32;
+            let _toggle = self.data_toggle.load(Ordering::Acquire);
 
             // This would configure the actual hardware qTD:
-            // - Buffer pointer = buffer_addr
-            // - Transfer size = transfer_size (max packet size)
-            // - Data toggle = toggle
+            // - Buffer pointer = _buffer_addr
+            // - Transfer size = _transfer_size (max packet size)
+            // - Data toggle = _toggle
             // - Endpoint = self.endpoint | (direction << 7)
             // - Device address = self.device_address
             // - PID = IN/OUT token
@@ -232,8 +232,8 @@ impl InterruptTransfer {
                 self.device_address,
                 self.endpoint,
                 self.direction,
-                transfer_size,
-                toggle
+                _transfer_size,
+                _toggle
             );
         }
 

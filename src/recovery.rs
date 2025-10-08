@@ -218,17 +218,25 @@ impl RecoveryCoordinator {
         unsafe {
             // Set port reset bit
             let portsc_addr = (0x402E_0184) as *mut u32; // PORTSC[0]
+            cortex_m::asm::dmb(); // ensure prior ops complete before MMIO read
             let mut portsc = core::ptr::read_volatile(portsc_addr);
+            cortex_m::asm::dmb(); // ensure read completes before modify
             portsc |= 1 << 8; // Port Reset
+            cortex_m::asm::dmb(); // ensure modify completes before MMIO write
             core::ptr::write_volatile(portsc_addr, portsc);
+            cortex_m::asm::dsb(); // ensure write completes before continuing
 
             // Wait for reset to complete (10ms minimum per USB spec)
             self.delay_ms(10);
 
             // Clear reset bit
+            cortex_m::asm::dmb();
             portsc = core::ptr::read_volatile(portsc_addr);
+            cortex_m::asm::dmb();
             portsc &= !(1 << 8);
+            cortex_m::asm::dmb();
             core::ptr::write_volatile(portsc_addr, portsc);
+            cortex_m::asm::dsb();
 
             // Wait for port to stabilize
             self.delay_ms(10);
