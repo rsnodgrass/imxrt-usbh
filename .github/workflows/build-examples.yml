@@ -1,0 +1,65 @@
+name: Build Examples
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-examples:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: thumbv7em-none-eabihf
+        components: llvm-tools-preview
+
+    - name: Install cargo-binutils
+      run: cargo install cargo-binutils
+
+    - name: Build all examples
+      run: cargo build --release --examples
+
+    - name: Convert examples to hex
+      run: |
+        for example in examples/*.rs; do
+          name=$(basename "$example" .rs)
+          echo "Converting $name to hex..."
+          cargo objcopy --release --example "$name" -- -O ihex "target/thumbv7em-none-eabihf/release/examples/$name.hex"
+        done
+
+    - name: Verify hex files
+      run: |
+        failed=0
+        for example in examples/*.rs; do
+          name=$(basename "$example" .rs)
+          hexfile="target/thumbv7em-none-eabihf/release/examples/$name.hex"
+
+          if [ ! -f "$hexfile" ]; then
+            echo "ERROR: $hexfile does not exist"
+            failed=1
+          elif [ ! -s "$hexfile" ]; then
+            echo "ERROR: $hexfile has zero size"
+            failed=1
+          else
+            size=$(stat -c%s "$hexfile" 2>/dev/null || stat -f%z "$hexfile")
+            echo "OK: $hexfile ($size bytes)"
+          fi
+        done
+
+        if [ $failed -eq 1 ]; then
+          exit 1
+        fi
+
+    - name: Upload hex files as artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: example-hex-files
+        path: target/thumbv7em-none-eabihf/release/examples/*.hex
