@@ -194,7 +194,6 @@
 
 pub mod controller;
 pub mod error_recovery;
-pub mod itd;
 pub mod periodic;
 pub mod qh;
 pub mod qtd;
@@ -203,7 +202,6 @@ pub mod transfer_executor;
 
 pub use controller::{EhciController, EhciControllerBuilder, Initialized, Running, Uninitialized};
 pub use error_recovery::{ErrorRecovery, ErrorType, RecoveryAction, RecoveryStats};
-pub use itd::IsocTransferDescriptor;
 pub use periodic::{InterruptScheduler, PeriodicFrameList, FRAME_LIST_SIZE};
 pub use qh::QueueHead;
 pub use qtd::QueueTD;
