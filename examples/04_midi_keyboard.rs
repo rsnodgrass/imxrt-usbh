@@ -53,12 +53,13 @@ use core::sync::atomic::{AtomicU32, Ordering};
 /// These addresses are from the i.MX RT1062 reference manual and are
 /// specific to the Teensy 4.x hardware platform.
 pub mod hardware_addresses {
-    /// USB PHY1 register base address (Reference Manual Section 15.6)
+    /// USB PHY2 register base address (Reference Manual Section 15.6)
     /// Controls the physical layer of the USB interface including:
     /// - PLL configuration for USB clock generation
     /// - Transceiver settings for signal levels
     /// - Power management for the USB PHY
-    pub const USBPHY1_BASE_ADDRESS: u32 = 0x400D_9000;
+    /// USB2 is used for host mode on Teensy (pins 30/31), USB1 is device/programming
+    pub const USBPHY2_BASE_ADDRESS: u32 = 0x400D_A000;
 
     /// Clock Control Module (CCM) register base address (Reference Manual Section 14)
     /// Controls all system clocks including:
@@ -706,7 +707,7 @@ impl MidiApp {
         let memory_pool = UsbMemoryPool::new();
 
         // Initialize USB PHY with documented register addresses
-        let phy_base = USBPHY1_BASE_ADDRESS as usize; // USB PHY1 register base
+        let phy_base = USBPHY2_BASE_ADDRESS as usize; // USB PHY2 register base
         let ccm_base = CCM_BASE_ADDRESS as usize; // Clock Control Module base
         let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 

@@ -418,8 +418,8 @@ impl EnumerationApp {
         // Initialize USB memory pool
         let memory_pool = UsbMemoryPool::new();
 
-        // Initialize USB PHY
-        let phy_base = 0x400D_9000;
+        // Initialize USB PHY (USB2 for host mode on Teensy pins 30/31)
+        let phy_base = 0x400D_A000; // USBPHY2 base address
         let ccm_base = 0x400F_C000;
         let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 
