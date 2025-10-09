@@ -43,10 +43,12 @@ mod timing {
 /// USBPHY register offsets per RM 66.6
 #[allow(dead_code)]
 const USBPHY_PWD_OFFSET: usize = 0x00; // Power-Down register
+/// TX register offset - reserved for future PHY calibration/tuning features
 #[allow(dead_code)]
-const USBPHY_TX_OFFSET: usize = 0x10; // TX register
+const USBPHY_TX_OFFSET: usize = 0x10;
+/// RX register offset - reserved for future PHY calibration/tuning features
 #[allow(dead_code)]
-const USBPHY_RX_OFFSET: usize = 0x20; // RX register
+const USBPHY_RX_OFFSET: usize = 0x20;
 const USBPHY_CTRL_OFFSET: usize = 0x30; // Control register
 #[allow(dead_code)]
 const USBPHY_CTRL_SET_OFFSET: usize = 0x34;

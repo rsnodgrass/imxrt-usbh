@@ -173,6 +173,10 @@ impl TransferExecutor {
     }
 
     /// Get QH reference
+    ///
+    /// NOTE: Currently unused - mutable version get_qh_mut() is used instead.
+    /// Safe to remove if no future use case for immutable access.
+    #[allow(dead_code)]
     fn get_qh(&self, handle: &QhHandle) -> Result<&QueueHead> {
         if handle.index >= 32 {
             return Err(UsbError::InvalidParameter);
