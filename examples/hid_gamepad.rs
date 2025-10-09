@@ -455,6 +455,23 @@ fn main() -> ! {
     info!("\r\n=== USB HID Gamepad Example ===");
     poller.poll();
 
+    // Initialize DMA region (CRITICAL: must be called before any buffer allocation)
+    info!("Initializing DMA region...");
+    poller.poll();
+
+    unsafe {
+        if let Err(_) = imxrt_usbh::dma::init_dma_region() {
+            info!("✗ DMA initialization FAILED!");
+            poller.poll();
+            loop {
+                led.toggle();
+                cortex_m::asm::delay(60_000_000);
+            }
+        }
+    }
+    info!("✓ DMA region initialized");
+    poller.poll();
+
     // Initialize USB PHY for host mode
     info!("Initializing USB PHY...");
     poller.poll();

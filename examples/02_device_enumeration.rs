@@ -62,6 +62,26 @@ fn main() -> ! {
     info!("\r\n=== USB Host Example 02: EHCI Controller Setup ===");
     poller.poll();
 
+    // STEP 0: Initialize DMA region (required before any buffer allocation)
+    // This example doesn't allocate buffers yet, but this is required for
+    // any real USB transfers. Always call this first in production code.
+    info!("Step 0: Initializing DMA region...");
+    poller.poll();
+
+    unsafe {
+        if let Err(_) = imxrt_usbh::dma::init_dma_region() {
+            info!("✗ DMA initialization FAILED!");
+            poller.poll();
+            loop {
+                led.toggle();
+                cortex_m::asm::delay(60_000_000);
+                poller.poll();
+            }
+        }
+    }
+    info!("✓ DMA region initialized");
+    poller.poll();
+
     // STEP 1: Initialize USB PHY (same as example 01)
     info!("Step 1: Initializing USB PHY...");
     poller.poll();
@@ -104,13 +124,13 @@ fn main() -> ! {
                 poller.poll();
                 info!("");
                 info!("What we have now:");
+                info!("  • DMA region - Memory for USB transfers");
                 info!("  • USB PHY - Physical layer for USB signaling");
                 info!("  • EHCI Controller - Manages USB protocol and transfers");
                 poller.poll();
                 info!("");
                 info!("What's still missing for full USB host:");
                 info!("  • Controller initialization and configuration");
-                info!("  • DMA memory management setup");
                 info!("  • Device enumeration state machine");
                 info!("  • Transfer queue management");
                 info!("  • Interrupt handling");
