@@ -108,6 +108,7 @@ impl PeriodicFrameList {
         // Link QH to every Nth frame based on interval
         let mut frame = 0;
         while frame < FRAME_LIST_SIZE {
+            // Safety: frame < FRAME_LIST_SIZE, qh_addr is valid physical address
             unsafe {
                 self.link_qh(frame, qh_addr)?;
             }
@@ -124,6 +125,7 @@ impl PeriodicFrameList {
     /// * `op_base` - EHCI operational register base address
     pub fn current_frame_index(op_base: usize) -> u32 {
         let frindex_ptr = (op_base + 0x0C) as *const u32;
+        // Safety: frindex_ptr is valid FRINDEX register at offset 0x0C from operational base
         let frindex = unsafe { read_register_at(frindex_ptr) };
         (frindex >> 3) & 0x3FF // Bits 12:3, mask to 1024 frames
     }
@@ -229,6 +231,7 @@ static INTERRUPT_SCHEDULER: InterruptScheduler = InterruptScheduler::new();
 ///
 /// Must be called once during USB host initialization
 pub unsafe fn init_periodic_schedule(op_base: usize) -> Result<()> {
+    // Safety: PERIODIC_FRAME_LIST is static, properly aligned, and initialized
     let frame_list = unsafe { &*core::ptr::addr_of!(PERIODIC_FRAME_LIST) };
 
     // Set PERIODICLISTBASE register (offset 0x14)
@@ -239,6 +242,7 @@ pub unsafe fn init_periodic_schedule(op_base: usize) -> Result<()> {
         return Err(UsbError::InvalidParameter);
     }
 
+    // Safety: Writing to PERIODICLISTBASE register at offset 0x14 with aligned address
     unsafe {
         write_register_at((op_base + 0x14) as *mut u32, base_addr);
     }
@@ -254,6 +258,7 @@ pub unsafe fn init_periodic_schedule(op_base: usize) -> Result<()> {
 pub unsafe fn enable_periodic_schedule(op_base: usize) -> Result<()> {
     let usbcmd_ptr = op_base as *mut u32;
 
+    // Safety: Setting periodic schedule enable bit in USBCMD register
     unsafe {
         set_bits_at(usbcmd_ptr, 1 << 4); // Periodic Schedule Enable bit
     }
@@ -263,6 +268,7 @@ pub unsafe fn enable_periodic_schedule(op_base: usize) -> Result<()> {
     let timeout = super::RegisterTimeout::new_ms(10);
 
     timeout.wait_for(|| {
+        // Safety: Reading USBSTS register to check periodic schedule status
         let usbsts = unsafe { read_register_at(usbsts_ptr) };
         (usbsts & (1 << 14)) != 0 // Periodic Schedule Status bit
     })?;
@@ -274,6 +280,7 @@ pub unsafe fn enable_periodic_schedule(op_base: usize) -> Result<()> {
 pub fn disable_periodic_schedule(op_base: usize) -> Result<()> {
     let usbcmd_ptr = op_base as *mut u32;
 
+    // Safety: Clearing periodic schedule enable bit in USBCMD register
     unsafe {
         clear_bits_at(usbcmd_ptr, 1 << 4); // Clear Periodic Schedule Enable
     }
@@ -283,6 +290,7 @@ pub fn disable_periodic_schedule(op_base: usize) -> Result<()> {
     let timeout = super::RegisterTimeout::new_ms(10);
 
     timeout.wait_for(|| {
+        // Safety: Reading USBSTS register to check periodic schedule has stopped
         let usbsts = unsafe { read_register_at(usbsts_ptr) };
         (usbsts & (1 << 14)) == 0 // Periodic Schedule Status cleared
     })?;
@@ -296,6 +304,7 @@ pub fn disable_periodic_schedule(op_base: usize) -> Result<()> {
 ///
 /// Caller must ensure exclusive access if modifying
 pub unsafe fn get_frame_list() -> &'static PeriodicFrameList {
+    // Safety: PERIODIC_FRAME_LIST is static, properly aligned, and initialized
     unsafe { &*core::ptr::addr_of!(PERIODIC_FRAME_LIST) }
 }
 
