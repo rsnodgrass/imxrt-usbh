@@ -205,7 +205,10 @@ pub use error_recovery::{ErrorRecovery, ErrorType, RecoveryAction, RecoveryStats
 pub use periodic::{InterruptScheduler, PeriodicFrameList, FRAME_LIST_SIZE};
 pub use qh::QueueHead;
 pub use qtd::QueueTD;
-pub use register::{Register, RegisterTimeout};
+pub use register::{
+    clear_bits_at, modify_register_at, read_register_at, set_bits_at, write_register_at, Register,
+    RegisterTimeout,
+};
 pub use transfer_executor::TransferExecutor;
 
 // Re-export important types for easier use

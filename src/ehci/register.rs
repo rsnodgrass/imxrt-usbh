@@ -95,6 +95,148 @@ impl Register<u32> {
     }
 }
 
+// === Raw Register Operations for Dynamic Addresses ===
+
+/// Validate that an address is within known i.MX RT1062 MMIO regions
+///
+/// # Returns
+/// `true` if address is in a known peripheral region, `false` otherwise
+///
+/// # Known MMIO Regions (from i.MX RT1060 Reference Manual Ch. 2):
+/// - 0x4000_0000 - 0x400F_FFFF: AIPS-1 (GPIO, Timers, UARTs, etc.)
+/// - 0x4010_0000 - 0x401F_FFFF: AIPS-2 (USB, USDHC, ENET, etc.)
+/// - 0x4020_0000 - 0x403F_FFFF: AIPS-3 (FlexSPI, SEMC config)
+/// - 0xE000_0000 - 0xE00F_FFFF: ARM Cortex-M7 system peripherals
+#[inline]
+const fn is_valid_mmio_address(addr: usize) -> bool {
+    matches!(addr,
+        0x4000_0000..=0x400F_FFFF  // AIPS-1
+        | 0x4010_0000..=0x401F_FFFF  // AIPS-2 (includes USB at 0x402E_xxxx)
+        | 0x4020_0000..=0x403F_FFFF  // AIPS-3
+        | 0xE000_0000..=0xE00F_FFFF  // ARM Cortex-M7 peripherals
+    )
+}
+
+/// Safely read a register at a raw address with memory barriers
+///
+/// # Safety
+///
+/// Caller must ensure address points to a valid MMIO register.
+/// This function validates the address is in a known MMIO region in debug builds.
+///
+/// # Panics
+///
+/// In debug builds, panics if address is not in a known MMIO region
+#[inline(always)]
+pub unsafe fn read_register_at(addr: *const u32) -> u32 {
+    debug_assert!(
+        is_valid_mmio_address(addr as usize),
+        "Invalid MMIO address: {:#x}",
+        addr as usize
+    );
+    unsafe {
+        cortex_m::asm::dmb();
+        let value = core::ptr::read_volatile(addr);
+        cortex_m::asm::dmb();
+        value
+    }
+}
+
+/// Safely write a register at a raw address with memory barriers
+///
+/// # Safety
+///
+/// Caller must ensure address points to a valid MMIO register.
+/// This function validates the address is in a known MMIO region in debug builds.
+///
+/// # Panics
+///
+/// In debug builds, panics if address is not in a known MMIO region
+#[inline(always)]
+pub unsafe fn write_register_at(addr: *mut u32, value: u32) {
+    debug_assert!(
+        is_valid_mmio_address(addr as usize),
+        "Invalid MMIO address: {:#x}",
+        addr as usize
+    );
+    unsafe {
+        cortex_m::asm::dmb();
+        core::ptr::write_volatile(addr, value);
+        cortex_m::asm::dsb();
+    }
+}
+
+/// Safely modify a register at a raw address with full memory barriers
+///
+/// Uses strict barrier ordering for ARM Cortex-M7 weakly-ordered memory:
+/// - DMB before read: ensures prior operations complete
+/// - DMB after read: ensures read completes before using value
+/// - DMB before write: ensures computation completes before write
+/// - DSB after write: ensures write completes before continuing
+///
+/// # Safety
+///
+/// Caller must ensure address points to a valid MMIO register.
+/// This function validates the address is in a known MMIO region in debug builds.
+///
+/// # Panics
+///
+/// In debug builds, panics if address is not in a known MMIO region
+#[inline(always)]
+pub unsafe fn modify_register_at<F>(addr: *mut u32, f: F)
+where
+    F: FnOnce(u32) -> u32,
+{
+    debug_assert!(
+        is_valid_mmio_address(addr as usize),
+        "Invalid MMIO address: {:#x}",
+        addr as usize
+    );
+    unsafe {
+        cortex_m::asm::dmb();
+        let current = core::ptr::read_volatile(addr);
+        cortex_m::asm::dmb();
+        let new_value = f(current);
+        cortex_m::asm::dmb();
+        core::ptr::write_volatile(addr, new_value);
+        cortex_m::asm::dsb();
+    }
+}
+
+/// Safely set bits in a register at a raw address
+///
+/// # Safety
+///
+/// Caller must ensure address points to a valid MMIO register.
+/// This function validates the address is in a known MMIO region in debug builds.
+///
+/// # Panics
+///
+/// In debug builds, panics if address is not in a known MMIO region
+#[inline(always)]
+pub unsafe fn set_bits_at(addr: *mut u32, mask: u32) {
+    unsafe {
+        modify_register_at(addr, |v| v | mask);
+    }
+}
+
+/// Safely clear bits in a register at a raw address
+///
+/// # Safety
+///
+/// Caller must ensure address points to a valid MMIO register.
+/// This function validates the address is in a known MMIO region in debug builds.
+///
+/// # Panics
+///
+/// In debug builds, panics if address is not in a known MMIO region
+#[inline(always)]
+pub unsafe fn clear_bits_at(addr: *mut u32, mask: u32) {
+    unsafe {
+        modify_register_at(addr, |v| v & !mask);
+    }
+}
+
 /// Timeout handling for register operations
 pub struct RegisterTimeout {
     start_cycles: u32,
