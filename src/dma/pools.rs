@@ -103,9 +103,13 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
 /// Pool utilization statistics
 #[derive(Debug, Clone, Copy)]
 pub struct PoolStats {
+    /// Total number of Queue Head descriptors in pool
     pub qh_total: usize,
+    /// Number of available (unallocated) Queue Heads
     pub qh_available: usize,
+    /// Total number of Queue Transfer Descriptors in pool
     pub qtd_total: usize,
+    /// Number of available (unallocated) qTDs
     pub qtd_available: usize,
 }
 
@@ -150,6 +154,11 @@ pub struct DataBufferPool<const N_SMALL: usize, const N_LARGE: usize> {
 }
 
 impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE> {
+    /// Create a new data buffer pool with specified capacities
+    ///
+    /// Creates a pool with N_SMALL small buffers (64 bytes each) and
+    /// N_LARGE large buffers (512 bytes each). All buffers are initially
+    /// unallocated and zero-initialized.
     pub const fn new() -> Self {
         const ATOMIC_FALSE: AtomicBool = AtomicBool::new(false);
 
@@ -259,9 +268,13 @@ pub enum BufferHandle {
 /// Data buffer pool statistics
 #[derive(Debug, Clone, Copy)]
 pub struct DataBufferStats {
+    /// Total number of small buffers (64 bytes) in pool
     pub small_total: usize,
+    /// Number of allocated small buffers
     pub small_allocated: usize,
+    /// Total number of large buffers (512 bytes) in pool
     pub large_total: usize,
+    /// Number of allocated large buffers
     pub large_allocated: usize,
 }
 
