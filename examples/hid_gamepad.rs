@@ -433,6 +433,11 @@ impl HidManager {
     }
 }
 
+#[no_mangle]
+fn _defmt_timestamp() -> u64 {
+    0
+}
+
 #[bsp::rt::entry]
 fn main() -> ! {
     let board::Resources {

@@ -656,15 +656,16 @@ fn configure_usb_clocks() {
         );
 
         // Configure USB PHY PLL
+        // CRITICAL: Use USB2 PLL for host mode (USB1 is device/programming port)
         let analog = ral::ccm_analog::CCM_ANALOG::instance();
 
-        modify_reg!(ral::ccm_analog, analog, PLL_USB1,
+        modify_reg!(ral::ccm_analog, analog, PLL_USB2,
             POWER: 1,
             ENABLE: 1,
             EN_USB_CLKS: 1
         );
 
-        while read_reg!(ral::ccm_analog, analog, PLL_USB1, LOCK) == 0 {}
+        while read_reg!(ral::ccm_analog, analog, PLL_USB2, LOCK) == 0 {}
     }
 }
 

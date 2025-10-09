@@ -36,6 +36,12 @@ use teensy4_panic as _;
 use imxrt_usbh::phy::UsbPhy;
 use log::info;
 
+/// defmt timestamp function (required by library's defmt usage)
+#[no_mangle]
+fn _defmt_timestamp() -> u64 {
+    0 // Simple timestamp - could use DWT cycle counter if needed
+}
+
 #[bsp::rt::entry]
 fn main() -> ! {
     let board::Resources {
