@@ -229,10 +229,22 @@ pub mod app {
         use crate::rtic::example::USB_INTERRUPT_HANDLER;
 
         /// Static DMA memory for queue heads (32-byte aligned per EHCI spec)
+        ///
+        /// Placed in DTCM (non-cacheable) for DMA coherency. DTCM on i.MX RT1062 is
+        /// at 0x2000_0000 and is non-cacheable, making it ideal for EHCI descriptors.
+        /// If DTCM linker section is not available, ensure proper cache maintenance
+        /// (clean before hardware reads, invalidate after hardware writes).
+        #[link_section = ".dtcm"]
         #[repr(C, align(32))]
         static mut QH_MEMORY: [QueueHead; 32] = [QueueHead::new(); 32];
 
         /// Static DMA memory for queue transfer descriptors (32-byte aligned per EHCI spec)
+        ///
+        /// Placed in DTCM (non-cacheable) for DMA coherency. DTCM on i.MX RT1062 is
+        /// at 0x2000_0000 and is non-cacheable, making it ideal for EHCI descriptors.
+        /// If DTCM linker section is not available, ensure proper cache maintenance
+        /// (clean before hardware reads, invalidate after hardware writes).
+        #[link_section = ".dtcm"]
         #[repr(C, align(32))]
         static mut QTD_MEMORY: [QueueTD; 128] = [QueueTD::new(); 128];
 

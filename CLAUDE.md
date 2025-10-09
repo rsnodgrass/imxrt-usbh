@@ -131,6 +131,34 @@ cargo readobj --release --example enumerate_device -- --section-headers
 - DMA buffers include explicit cache coherency operations (clean/invalidate)
 - Static memory pools to avoid dynamic allocation in `no_std`
 
+### Register Access Safety
+
+**ALWAYS use safe register helpers from `src/ehci/register.rs`:**
+
+```rust
+use crate::ehci::register::{read_register_at, write_register_at, modify_register_at};
+```
+
+These helpers provide:
+- Proper ARM Cortex-M7 memory barriers (DMB/DSB)
+- Debug-build address validation (checks MMIO region)
+- Consistent barrier ordering across codebase
+
+**Address Validation** (Debug Builds Only):
+- `is_valid_mmio_address()` validates addresses are in known i.MX RT1062 MMIO regions
+- **AIPS-1**: 0x4000_0000 - 0x400F_FFFF (GPIO, Timers, UARTs)
+- **AIPS-2/3**: 0x4010_0000 - 0x403F_FFFF (USB at 0x402E_xxxx, USDHC, ENET, FlexSPI)
+- **Cortex-M7**: 0xE000_0000 - 0xE00F_FFFF (ARM system peripherals)
+- Invalid addresses trigger debug_assert! panic with address details
+
+**When to Use RAL vs. Raw Helpers:**
+- Use **RAL + safe_ macros** when peripheral has full RAL support with field definitions
+- Use **raw helpers** when:
+  - Dynamic address calculation needed (EHCI operational base, PORTSC arrays)
+  - Peripheral lacks complete RAL definitions
+  - Emergency handlers requiring minimal overhead
+  - Multiple controllers at different base addresses
+
 ### Cache Coherency (Critical)
 
 ARM Cortex-M7 has D-cache that must be managed for DMA:
@@ -301,6 +329,61 @@ let _ = memory_pool.free_buffer(&buffer);
 1. Allocate: `memory_pool.alloc_buffer(size)` → Returns `Option<DmaBuffer>`
 2. Use: Pass to transfer managers or access via `as_slice()` / `as_mut_slice()`
 3. Free: Either consumed by transfer or manually freed with `free_buffer(&buffer)`
+
+### MMIO Register Access (CRITICAL)
+
+ARM Cortex-M7 has weakly-ordered memory requiring explicit barriers for all MMIO operations.
+
+**ALWAYS use the safe register access helpers from `src/ehci/register.rs`:**
+
+```rust
+use crate::ehci::register::{read_register_at, write_register_at, modify_register_at};
+
+// Read register
+let value = unsafe { read_register_at(0x402E_0144 as *const u32) };
+
+// Write register
+unsafe { write_register_at(0x402E_0140 as *mut u32, 0x0008_1000) };
+
+// Read-modify-write register
+unsafe {
+    modify_register_at(0x402E_0140 as *mut u32, |cmd| cmd | 0x01); // Set bit 0
+}
+```
+
+**For RAL-based register access, use the safe_ macros:**
+
+```rust
+use imxrt_ral as ral;
+
+// Read with barriers
+let value = safe_read_reg!(ral::usb, usb_instance, USBCMD);
+
+// Write with barriers
+safe_write_reg!(ral::usb, usb_instance, USBCMD, 0x0008_1000);
+
+// Modify with barriers
+safe_modify_reg!(ral::usb, usb_instance, USBCMD,
+    RS: 1,  // Run/Stop
+    ITC: 8  // Interrupt Threshold
+);
+```
+
+**Memory Barrier Rules:**
+- **Read**: `dmb()` before + `dmb()` after
+- **Write**: `dmb()` before + `dsb()` after (DSB ensures write completes)
+- **Modify**: `dmb()` before read, `dmb()` after read, `dmb()` before write, `dsb()` after write
+
+**DO NOT**:
+- Use raw `read_volatile`/`write_volatile` without barriers
+- Use imxrt_ral `read_reg!`/`write_reg!`/`modify_reg!` directly (missing barriers)
+- Omit barriers "because it works in testing" (weakly-ordered memory allows reordering)
+
+**Why This Matters:**
+- Missing barriers cause "works with debug prints, fails without" bugs
+- Hardware register writes may not complete before next instruction
+- Register reads may return stale cached values
+- DMA coherency issues manifest as data corruption
 
 ### Device Enumeration Flow
 

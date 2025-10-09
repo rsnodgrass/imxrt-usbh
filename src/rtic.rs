@@ -3,9 +3,10 @@
 //! Implements embedded systems best practices for interrupt latency optimization
 //! and deterministic real-time behavior per RTIC 2.0 patterns
 
+use crate::ehci::register::{read_register_at, write_register_at, modify_register_at};
 use crate::error::{Result, UsbError};
 use crate::perf::{InterruptTimer, PerfCounters};
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use cortex_m::asm;
 
 pub mod interrupt;
@@ -197,16 +198,48 @@ pub struct UsbInterruptHandler {
     overruns: AtomicU8,
     /// Performance counters reference
     perf_counters: &'static PerfCounters,
+    /// USB controller base address
+    usb_base: usize,
+    /// Cached operational registers base address
+    op_base: AtomicU32,
 }
 
 impl UsbInterruptHandler {
     /// Create new interrupt handler
-    pub const fn new(perf_counters: &'static PerfCounters) -> Self {
+    pub const fn new(perf_counters: &'static PerfCounters, usb_base: usize) -> Self {
         Self {
             urgent_events: EventRingBuffer::new(),
             deferred_events: EventRingBuffer::new(),
             overruns: AtomicU8::new(0),
             perf_counters,
+            usb_base,
+            op_base: AtomicU32::new(0),
+        }
+    }
+
+    /// Initialize and cache operational base address
+    ///
+    /// Must be called once after USB controller initialization
+    pub fn init_op_base(&self) {
+        // Safety: usb_base points to valid EHCI capability registers
+        let cap_base = unsafe { read_register_at(self.usb_base as *const u32) };
+        let cap_length = (cap_base & 0xFF) as u32;
+        let op_base = (self.usb_base as u32) + cap_length;
+        self.op_base.store(op_base, Ordering::Release);
+    }
+
+    /// Get operational registers base address
+    #[inline(always)]
+    fn operational_base(&self) -> u32 {
+        let op_base = self.op_base.load(Ordering::Acquire);
+        // If not initialized, calculate on the fly (slower path)
+        if op_base == 0 {
+            // Safety: usb_base points to valid EHCI capability registers
+            let cap_base = unsafe { read_register_at(self.usb_base as *const u32) };
+            let cap_length = (cap_base & 0xFF) as u32;
+            (self.usb_base as u32) + cap_length
+        } else {
+            op_base
         }
     }
 
@@ -310,66 +343,60 @@ impl UsbInterruptHandler {
     /// Optimized register access for critical path
     #[inline(always)]
     fn read_port_status_fast(&self) -> u32 {
-        // Direct register access for minimal latency
-        // Safety: 0x402E_0044 is valid PORTSC[0] register address for USB2 on i.MX RT1062
-        unsafe {
-            core::ptr::read_volatile(0x402E_0044 as *const u32) // PORTSC[0]
-        }
+        let op_base = self.operational_base();
+        let portsc_addr = (op_base + 0x44) as *const u32; // PORTSC[0] at offset 0x44
+        // Safety: portsc_addr is valid PORTSC[0] register calculated from operational base
+        unsafe { read_register_at(portsc_addr) }
     }
 
     /// Clear interrupt status with minimal cycles
     #[inline(always)]
     fn clear_interrupt_status(&self, status: u32) {
-        // Safety: 0x402E_0004 is valid USBSTS register address for USB2 on i.MX RT1062
-        unsafe {
-            core::ptr::write_volatile(0x402E_0004 as *mut u32, status); // USBSTS
-        }
+        let op_base = self.operational_base();
+        let usbsts_addr = (op_base + 0x04) as *mut u32; // USBSTS at offset 0x04
+        // Safety: usbsts_addr is valid USBSTS register calculated from operational base
+        unsafe { write_register_at(usbsts_addr, status) }; // W1C
     }
 
     /// Emergency VBUS shutdown for over-current protection
     #[inline(never)]
     fn emergency_vbus_shutdown(&self) {
-        // Safety: 0x402E_0044 is valid PORTSC[0] register, emergency context justifies direct access
+        let op_base = self.operational_base();
+        let portsc = (op_base + 0x44) as *mut u32; // PORTSC[0]
+        // Safety: portsc is valid PORTSC[0] register, emergency context
         unsafe {
-            // Immediately disable VBUS power
-            let portsc = 0x402E_0044 as *mut u32;
-            let mut port = core::ptr::read_volatile(portsc);
-            port &= !(1 << 12); // Clear Port Power
-            core::ptr::write_volatile(portsc, port);
+            modify_register_at(portsc, |port| port & !(1 << 12)); // Clear Port Power
         }
     }
 
     /// Emergency controller reset for system errors
     fn emergency_controller_reset(&self) -> Result<()> {
-        // Safety: 0x402E_0000 is valid USBCMD register, emergency context justifies direct access
+        let op_base = self.operational_base();
+        let usbcmd = op_base as *mut u32; // USBCMD at offset 0x00
+        // Safety: usbcmd is valid USBCMD register, emergency context
         unsafe {
-            // Assert controller reset
-            let usbcmd = 0x402E_0000 as *mut u32;
-            let mut cmd = core::ptr::read_volatile(usbcmd);
-            cmd |= 1 << 1; // Host Controller Reset
-            core::ptr::write_volatile(usbcmd, cmd);
+            modify_register_at(usbcmd, |cmd| cmd | (1 << 1)); // Host Controller Reset
         }
         Ok(())
     }
 
     /// Emergency port disable for critical port errors
     fn emergency_port_disable(&self) {
-        // Safety: 0x402E_0044 is valid PORTSC[0] register, emergency context justifies direct access
+        let op_base = self.operational_base();
+        let portsc = (op_base + 0x44) as *mut u32; // PORTSC[0]
+        // Safety: portsc is valid PORTSC[0] register, emergency context
         unsafe {
-            let portsc = 0x402E_0044 as *mut u32;
-            let mut port = core::ptr::read_volatile(portsc);
-            port &= !(1 << 2); // Clear Port Enabled
-            core::ptr::write_volatile(portsc, port);
+            modify_register_at(portsc, |port| port & !(1 << 2)); // Clear Port Enabled
         }
     }
 
     /// Clear host system error interrupt
     #[inline(always)]
     fn clear_host_system_error(&self) {
-        // Safety: 0x402E_0004 is valid USBSTS register, write-1-to-clear HSE bit
-        unsafe {
-            core::ptr::write_volatile(0x402E_0004 as *mut u32, 1 << 4); // Clear HSE bit
-        }
+        let op_base = self.operational_base();
+        let usbsts = (op_base + 0x04) as *mut u32; // USBSTS at offset 0x04
+        // Safety: usbsts is valid USBSTS register, write-1-to-clear HSE bit
+        unsafe { write_register_at(usbsts, 1 << 4) }; // Clear HSE bit (W1C)
     }
 
     /// Handle transfer completion in background
@@ -490,9 +517,12 @@ pub mod example {
     use super::*;
     use crate::perf::PERF_COUNTERS;
 
+    /// USB2 controller base address on i.MX RT1062
+    pub const USB2_BASE: usize = 0x402E_0200;
+
     /// Global interrupt handler instance
     pub static USB_INTERRUPT_HANDLER: UsbInterruptHandler =
-        UsbInterruptHandler::new(&PERF_COUNTERS);
+        UsbInterruptHandler::new(&PERF_COUNTERS, USB2_BASE);
 
     /// USB interrupt handler for RTIC integration
     pub fn usb_interrupt_rtic() -> Result<()> {

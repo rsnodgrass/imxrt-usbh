@@ -108,15 +108,13 @@ impl Register<u32> {
 ///
 /// # Known MMIO Regions (from i.MX RT1060 Reference Manual Ch. 2):
 /// - 0x4000_0000 - 0x400F_FFFF: AIPS-1 (GPIO, Timers, UARTs, etc.)
-/// - 0x4010_0000 - 0x401F_FFFF: AIPS-2 (USB, USDHC, ENET, etc.)
-/// - 0x4020_0000 - 0x403F_FFFF: AIPS-3 (FlexSPI, SEMC config)
+/// - 0x4010_0000 - 0x403F_FFFF: AIPS-2 and AIPS-3 (USB at 0x402E_xxxx, USDHC, ENET, FlexSPI, etc.)
 /// - 0xE000_0000 - 0xE00F_FFFF: ARM Cortex-M7 system peripherals
 #[inline]
 const fn is_valid_mmio_address(addr: usize) -> bool {
     matches!(addr,
         0x4000_0000..=0x400F_FFFF  // AIPS-1
-        | 0x4010_0000..=0x401F_FFFF  // AIPS-2 (includes USB at 0x402E_xxxx)
-        | 0x4020_0000..=0x403F_FFFF  // AIPS-3
+        | 0x4010_0000..=0x403F_FFFF  // AIPS-2 and AIPS-3 (includes USB at 0x402E_xxxx)
         | 0xE000_0000..=0xE00F_FFFF  // ARM Cortex-M7 peripherals
     )
 }
