@@ -105,45 +105,51 @@ For advanced usage and integration into your own projects:
 ```rust
 use imxrt_usbh::{
     enumeration::DeviceEnumerator,
-    dma::memory::USB_MEMORY_POOL,
-    ehci::controller::EhciController,
-    BulkTransferManager, InterruptTransferManager, Direction,
+    dma::memory::UsbMemoryPool,
+    ehci::{EhciController, USB2_BASE},
+    transfer::{BulkTransferManager, InterruptTransferManager, Direction},
+    dma::descriptor::DescriptorAllocator,
 };
 
-// Initialize USB host
-let mut controller = EhciController::new(usb1_base, usb1_registers);
-controller.init()?;
+// Initialize DMA region (CRITICAL: must be called first)
+unsafe { imxrt_usbh::dma::init_dma_region()?; }
 
-// Enumerate connected device
-let mut memory_pool = unsafe { &mut USB_MEMORY_POOL };
-let mut enumerator = DeviceEnumerator::new(&mut controller, &mut memory_pool);
-let device = enumerator.enumerate_device()?;
+// Initialize USB host controller with 8 ports
+let mut controller = unsafe { EhciController::<8>::new(USB2_BASE)? };
+let mut controller = unsafe { controller.initialize()? };
 
-// Perform bulk data transfer
-let mut bulk_manager = BulkTransferManager::new();
-let mut buffer_pool = memory_pool.dma_buffer_pool();
-let data_buffer = buffer_pool.alloc(512)?;
+// Get memory pool for buffer allocation
+let mut memory_pool = UsbMemoryPool::new();
+
+// Allocate a DMA buffer for transfers
+let data_buffer = memory_pool.alloc_buffer(512)?;
+
+// Create descriptor allocator for queue management
+let mut allocator = DescriptorAllocator::<32, 64>::new();
+
+// Create transfer manager
+let mut bulk_manager = BulkTransferManager::<16>::new();
 
 // Submit bulk IN transfer
 let transfer_id = bulk_manager.submit(
     Direction::In,        // Read from device
-    device.address,       // Device address
+    1,                    // Device address
     0x81,                 // Bulk IN endpoint
     512,                  // Max packet size
     data_buffer,          // DMA buffer
     1000,                 // Timeout (1 second)
 )?;
 
-// Start the transfer
+// Start the transfer with descriptor allocator
 bulk_manager.start_transfer(transfer_id, &mut allocator)?;
 
 // Setup periodic interrupt transfer (for HID devices)
-let mut interrupt_manager = InterruptTransferManager::new();
-let hid_buffer = buffer_pool.alloc(64)?;
+let mut interrupt_manager = InterruptTransferManager::<32>::new();
+let hid_buffer = memory_pool.alloc_buffer(64)?;
 
 let int_transfer_id = interrupt_manager.submit(
     Direction::In,        // Read from device
-    device.address,       // Device address
+    1,                    // Device address
     0x81,                 // Interrupt IN endpoint
     64,                   // Max packet size
     hid_buffer,           // DMA buffer

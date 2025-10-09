@@ -86,11 +86,7 @@ impl SimpleControlTransfer {
     ) -> Result<usize> {
         // Allocate data buffer if needed
         let mut data_buffer = if self.setup.wLength > 0 {
-            Some(
-                memory_pool
-                    .alloc_buffer(self.setup.wLength as usize)
-                    .ok_or(UsbError::NoResources)?,
-            )
+            Some(memory_pool.alloc_buffer(self.setup.wLength as usize)?)
         } else {
             None
         };

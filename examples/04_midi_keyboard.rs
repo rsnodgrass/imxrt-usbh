@@ -761,7 +761,7 @@ impl MidiApp {
                     info!("Start playing to see MIDI events\r\n");
 
                     // Allocate buffer for bulk IN transfer (MIDI packets are 4 bytes, but use 64-byte buffer)
-                    if let Some(buffer) = self.memory_pool.alloc_buffer(64) {
+                    if let Ok(buffer) = self.memory_pool.alloc_buffer(64) {
                         match self.bulk_mgr.submit(
                             Direction::In,
                             device.device_info.address,
@@ -777,7 +777,7 @@ impl MidiApp {
                             Err(e) => {
                                 info!("Failed to submit MIDI bulk transfer: {:?}", e);
                                 // free buffer on error
-                                if let Some(buffer) = self.memory_pool.alloc_buffer(64) {
+                                if let Ok(buffer) = self.memory_pool.alloc_buffer(64) {
                                     let _ = self.memory_pool.free_buffer(&buffer);
                                 }
                             }
@@ -850,7 +850,7 @@ impl MidiApp {
                         let _ = self.memory_pool.free_buffer(&buffer);
 
                         // Resubmit transfer for continuous reading
-                        if let Some(new_buffer) = self.memory_pool.alloc_buffer(64) {
+                        if let Ok(new_buffer) = self.memory_pool.alloc_buffer(64) {
                             match self.bulk_mgr.submit(
                                 Direction::In,
                                 device_addr,
@@ -877,7 +877,7 @@ impl MidiApp {
                     }
 
                     // Resubmit transfer after error
-                    if let Some(new_buffer) = self.memory_pool.alloc_buffer(64) {
+                    if let Ok(new_buffer) = self.memory_pool.alloc_buffer(64) {
                         match self.bulk_mgr.submit(
                             Direction::In,
                             device_addr,

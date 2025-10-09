@@ -6,7 +6,7 @@
 
 use crate::dma::{cache_ops, DescriptorAllocator, DmaBuffer, QhHandle, QtdHandle};
 use crate::error::{Result, UsbError};
-use crate::transfer::Direction;
+use crate::transfer::{Direction, TransferState};
 use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 /// Interrupt transfer states
@@ -29,6 +29,12 @@ pub enum InterruptState {
 
 impl From<u8> for InterruptState {
     fn from(val: u8) -> Self {
+        Self::from_u8(val)
+    }
+}
+
+impl crate::transfer::TransferState for InterruptState {
+    fn from_u8(val: u8) -> Self {
         match val {
             0 => Self::Idle,
             1 => Self::Scheduled,
@@ -42,6 +48,10 @@ impl From<u8> for InterruptState {
                 Self::Failed
             }
         }
+    }
+
+    fn to_u8(self) -> u8 {
+        self as u8
     }
 }
 
@@ -114,12 +124,12 @@ impl InterruptTransfer {
 
     /// Get current state
     pub fn state(&self) -> InterruptState {
-        self.state.load(Ordering::Acquire).into()
+        InterruptState::load_from(&self.state)
     }
 
     /// Transition to new state
     fn transition_state(&self, new_state: InterruptState) {
-        self.state.store(new_state as u8, Ordering::Release);
+        new_state.store_into(&self.state);
     }
 
     /// Schedule interrupt transfer for next appropriate frame

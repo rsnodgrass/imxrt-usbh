@@ -89,6 +89,9 @@ cargo readobj --release --example enumerate_device -- --section-headers
   - `qtd.rs` - Queue Transfer Descriptors for DMA transfers
   - `qh.rs` - Queue Heads for endpoint management
   - `register.rs` - Memory-mapped register abstractions
+  - `error_recovery.rs` - EHCI error recovery mechanisms with RecoveryStats
+  - `transfer_executor.rs` - Transfer execution layer bridging APIs to hardware
+  - `periodic.rs` - Periodic schedule (1024-entry frame list) for interrupt/isochronous transfers
 
 - **`dma/`** - Cache-coherent DMA buffer management
   - **ALWAYS USE**: `dma::DmaBuffer` (defined in `dma.rs`) - Production DMA buffer type

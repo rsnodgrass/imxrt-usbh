@@ -65,20 +65,20 @@ impl UsbMemoryPool {
 
     /// Allocate DMA buffer slot
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if DMA region not initialized (debug builds only).
-    /// Release builds return None but may have cache coherency issues.
-    pub fn alloc_buffer(&mut self, size: usize) -> Option<super::DmaBuffer> {
-        // Verify DMA initialization in debug builds
-        debug_assert!(
-            super::is_dma_initialized(),
-            "DMA buffer allocation before init_dma_region() - cache coherency violation risk"
-        );
+    /// Returns `UsbError::InvalidState` if DMA region not initialized (critical for cache coherency).
+    /// Returns `UsbError::InvalidParameter` if size exceeds 512 bytes.
+    /// Returns `UsbError::NoResources` if all buffer slots are allocated.
+    pub fn alloc_buffer(&mut self, size: usize) -> Result<super::DmaBuffer> {
+        // Check DMA initialization in ALL builds (not just debug)
+        if !super::is_dma_initialized() {
+            return Err(UsbError::InvalidState);
+        }
 
         // Fixed 512-byte buffers, reject requests that are too large
         if size > 512 {
-            return None;
+            return Err(UsbError::InvalidParameter);
         }
 
         let free_bit = (!self.buffer_allocated).trailing_zeros();
@@ -94,9 +94,9 @@ impl UsbMemoryPool {
                 NonNull::new_unchecked(buffers[index].as_mut_ptr())
             };
 
-            Some(super::DmaBuffer::new(ptr, size.max(1), index))
+            Ok(super::DmaBuffer::new(ptr, size.max(1), index))
         } else {
-            None
+            Err(UsbError::NoResources)
         }
     }
 

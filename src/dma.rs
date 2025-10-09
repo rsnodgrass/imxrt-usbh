@@ -41,6 +41,12 @@ pub const DMA_ALIGNMENT: usize = 32;
 /// Maximum DMA buffer size (20KB per USB 2.0 spec for qTD)
 pub const MAX_DMA_BUFFER_SIZE: usize = 20 * 1024;
 
+// Compile-time assertions for DMA requirements
+const _: () = {
+    assert!(DMA_ALIGNMENT == 32, "DMA alignment must match Cortex-M7 cache line size");
+    assert!(MAX_DMA_BUFFER_SIZE == 20 * 1024, "Max buffer size must match EHCI qTD specification");
+};
+
 /// DMA-safe memory region in non-cacheable RAM
 ///
 /// **CRITICAL**: Must be placed in OCRAM (non-cacheable) memory region.
@@ -92,40 +98,7 @@ pub struct DmaRegion {
 static mut DMA_REGION: DmaRegion = DmaRegion {
     qh_pool: [0; 64 * 64],
     qtd_pool: [0; 256 * 32],
-    data_buffers: [
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-        CacheAlignedBuffer::new(),
-    ],
+    data_buffers: [const { CacheAlignedBuffer::new() }; 32],
 };
 
 /// DMA region initialization flag
@@ -240,6 +213,7 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
 ///
 /// NOT Copy/Clone - ensures single ownership and prevents aliasing.
 /// Buffer is automatically returned to pool when dropped.
+#[must_use = "DMA buffer will leak if not used or explicitly freed"]
 pub struct DmaBuffer {
     ptr: NonNull<u8>,
     size: usize,
@@ -340,49 +314,61 @@ pub mod cache_ops {
     const SCB_DCIMVAC: *mut u32 = 0xE000_EF5C as *mut u32; // Invalidate by MVA to PoC
     const SCB_DCCIMVAC: *mut u32 = 0xE000_EF70 as *mut u32; // Clean & Invalidate by MVA to PoC
 
+    /// Cache operation types
+    #[derive(Copy, Clone)]
+    enum CacheOp {
+        Clean,
+        Invalidate,
+        CleanInvalidate,
+    }
+
+    impl CacheOp {
+        /// Get the SCB register address for this cache operation
+        const fn register(self) -> *mut u32 {
+            match self {
+                Self::Clean => SCB_DCCMVAC,
+                Self::Invalidate => SCB_DCIMVAC,
+                Self::CleanInvalidate => SCB_DCCIMVAC,
+            }
+        }
+    }
+
+    /// Generic cache operation on address range
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure addr/size represent a valid memory region.
+    unsafe fn cache_op(op: CacheOp, addr: usize, size: usize) {
+        unsafe {
+            dsb(); // Ensure all previous operations complete
+
+            // Align to cache line boundaries
+            let start = addr & !(DCACHE_LINE_SIZE - 1);
+            let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
+
+            // Perform operation on each cache line
+            for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
+                core::ptr::write_volatile(op.register(), line_addr as u32);
+            }
+
+            dsb(); // Ensure cache operations complete
+            isb(); // Ensure instruction synchronization
+        }
+    }
+
+    /// Clean data cache (write dirty lines to memory)
     pub fn clean_dcache(addr: usize, size: usize) {
-        unsafe {
-            dsb(); // Ensure all previous writes complete
-            let start = addr & !(DCACHE_LINE_SIZE - 1);
-            let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
-
-            for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
-                core::ptr::write_volatile(SCB_DCCMVAC, line_addr as u32);
-            }
-
-            dsb(); // Ensure cache operations complete
-            isb(); // Ensure instruction synchronization
-        }
+        unsafe { cache_op(CacheOp::Clean, addr, size) }
     }
 
+    /// Invalidate data cache (discard cached data, re-read from memory)
     pub fn invalidate_dcache(addr: usize, size: usize) {
-        unsafe {
-            dsb(); // Ensure all previous operations complete
-            let start = addr & !(DCACHE_LINE_SIZE - 1);
-            let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
-
-            for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
-                core::ptr::write_volatile(SCB_DCIMVAC, line_addr as u32);
-            }
-
-            dsb(); // Ensure cache operations complete
-            isb(); // Ensure instruction synchronization
-        }
+        unsafe { cache_op(CacheOp::Invalidate, addr, size) }
     }
 
+    /// Clean and invalidate data cache (write dirty lines, then discard)
     pub fn clean_invalidate_dcache(addr: usize, size: usize) {
-        unsafe {
-            dsb(); // Ensure all previous operations complete
-            let start = addr & !(DCACHE_LINE_SIZE - 1);
-            let end = (addr + size + DCACHE_LINE_SIZE - 1) & !(DCACHE_LINE_SIZE - 1);
-
-            for line_addr in (start..end).step_by(DCACHE_LINE_SIZE) {
-                core::ptr::write_volatile(SCB_DCCIMVAC, line_addr as u32);
-            }
-
-            dsb(); // Ensure cache operations complete
-            isb(); // Ensure instruction synchronization
-        }
+        unsafe { cache_op(CacheOp::CleanInvalidate, addr, size) }
     }
 
     #[inline]

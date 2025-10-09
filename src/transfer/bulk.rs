@@ -2,7 +2,7 @@
 
 use crate::dma::{cache_ops, DescriptorAllocator, DmaBuffer, QhHandle, QtdHandle};
 use crate::error::{Result, UsbError};
-use crate::transfer::Direction;
+use crate::transfer::{Direction, TransferState};
 use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 fn get_current_tick_count() -> u32 {
@@ -34,6 +34,12 @@ pub enum BulkState {
 
 impl From<u8> for BulkState {
     fn from(val: u8) -> Self {
+        Self::from_u8(val)
+    }
+}
+
+impl crate::transfer::TransferState for BulkState {
+    fn from_u8(val: u8) -> Self {
         match val {
             0 => Self::Idle,
             1 => Self::Active,
@@ -46,6 +52,10 @@ impl From<u8> for BulkState {
                 Self::Failed
             }
         }
+    }
+
+    fn to_u8(self) -> u8 {
+        self as u8
     }
 }
 
@@ -116,12 +126,12 @@ impl BulkTransfer {
 
     /// Get current state
     pub fn state(&self) -> BulkState {
-        self.state.load(Ordering::Acquire).into()
+        BulkState::load_from(&self.state)
     }
 
     /// Transition to new state
     fn transition_state(&self, new_state: BulkState) {
-        self.state.store(new_state as u8, Ordering::Release);
+        new_state.store_into(&self.state);
     }
 
     /// Start bulk transfer

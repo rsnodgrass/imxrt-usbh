@@ -540,7 +540,7 @@ fn main() -> ! {
                         // Set up interrupt transfer for gamepad input
                         let mut interrupt_mgr = InterruptTransferManager::<4>::new();
 
-                        if let Some(buffer) = memory_pool.alloc_buffer(8) {
+                        if let Ok(buffer) = memory_pool.alloc_buffer(8) {
                             match interrupt_mgr.submit(
                                 Direction::In,
                                 device.address,

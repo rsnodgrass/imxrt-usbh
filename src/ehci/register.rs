@@ -278,4 +278,60 @@ impl RegisterTimeout {
         }
         Ok(())
     }
+
+    /// Wait for a register bit to clear (become 0)
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure reg points to a valid MMIO register.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use imxrt_usbh::ehci::RegisterTimeout;
+    /// # let usbcmd_ptr = 0x402E_0140 as *const u32;
+    /// // Wait for HC Reset bit to clear
+    /// RegisterTimeout::new_us(10_000).wait_for_bit_clear(usbcmd_ptr, 0x02)?;
+    /// # Ok::<(), imxrt_usbh::UsbError>(())
+    /// ```
+    pub fn wait_for_bit_clear(
+        &self,
+        reg: *const u32,
+        mask: u32,
+    ) -> Result<(), crate::error::UsbError> {
+        self.wait_for(|| unsafe {
+            cortex_m::asm::dmb();
+            let val = core::ptr::read_volatile(reg);
+            cortex_m::asm::dmb();
+            (val & mask) == 0
+        })
+    }
+
+    /// Wait for a register bit to be set (become 1)
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure reg points to a valid MMIO register.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use imxrt_usbh::ehci::RegisterTimeout;
+    /// # let usbsts_ptr = 0x402E_0144 as *const u32;
+    /// // Wait for HC Halted bit to be set
+    /// RegisterTimeout::new_us(2_000).wait_for_bit_set(usbsts_ptr, 0x1000)?;
+    /// # Ok::<(), imxrt_usbh::UsbError>(())
+    /// ```
+    pub fn wait_for_bit_set(
+        &self,
+        reg: *const u32,
+        mask: u32,
+    ) -> Result<(), crate::error::UsbError> {
+        self.wait_for(|| unsafe {
+            cortex_m::asm::dmb();
+            let val = core::ptr::read_volatile(reg);
+            cortex_m::asm::dmb();
+            (val & mask) != 0
+        })
+    }
 }

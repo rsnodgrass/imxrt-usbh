@@ -3,12 +3,35 @@
 //! Implements control, bulk, interrupt, and isochronous transfer types.
 
 use crate::error::UsbError;
+use core::sync::atomic::{AtomicU8, Ordering};
 
 pub mod bulk;
 pub mod control;
 pub mod interrupt;
 pub mod isochronous;
 pub mod simple_control;
+
+/// Trait for transfer state enums with atomic storage
+///
+/// Reduces boilerplate for state conversions across transfer types.
+/// All transfer state enums (BulkState, InterruptState, etc.) can implement this.
+pub trait TransferState: Copy + Sized {
+    /// Convert from u8 representation
+    fn from_u8(val: u8) -> Self;
+
+    /// Convert to u8 representation
+    fn to_u8(self) -> u8;
+
+    /// Load state from atomic storage
+    fn load_from(atomic: &AtomicU8) -> Self {
+        Self::from_u8(atomic.load(Ordering::Acquire))
+    }
+
+    /// Store state to atomic storage
+    fn store_into(self, atomic: &AtomicU8) {
+        atomic.store(self.to_u8(), Ordering::Release);
+    }
+}
 
 pub use bulk::{bulk_endpoint, BulkState, BulkTransfer, BulkTransferManager};
 pub use interrupt::{

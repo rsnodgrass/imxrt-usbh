@@ -142,6 +142,16 @@ pub use transfer::{
     IsochronousTransfer, IsochronousTransferManager, MicroframeTiming, TransferType,
 };
 
+// Type aliases for improved readability
+/// USB device address (0-127)
+pub type DeviceAddress = u8;
+/// USB endpoint number (0-15, direction encoded separately)
+pub type EndpointNumber = u8;
+/// Maximum packet size for an endpoint
+pub type MaxPacketSize = u16;
+/// Transfer result type
+pub type TransferResult<T = ()> = Result<T>;
+
 use core::sync::atomic::{AtomicBool, Ordering};
 
 /// Global flag for USB host initialization state

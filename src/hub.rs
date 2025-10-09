@@ -449,7 +449,7 @@ impl Hub {
             0x04, 0x00, // wLength: 4
         ];
 
-        let mut buffer = memory_pool.alloc_buffer(4).ok_or(UsbError::NoResources)?;
+        let mut buffer = memory_pool.alloc_buffer(4)?;
 
         unsafe {
             executor.execute_control_transfer(
@@ -493,7 +493,7 @@ impl Hub {
             0x00, // wLength: 4
         ];
 
-        let mut buffer = memory_pool.alloc_buffer(4).ok_or(UsbError::NoResources)?;
+        let mut buffer = memory_pool.alloc_buffer(4)?;
 
         unsafe {
             executor.execute_control_transfer(

@@ -215,6 +215,12 @@ pub use transfer_executor::TransferExecutor;
 pub use qh::{capabilities, endpoint};
 pub use qtd::token;
 
+// Type aliases for common EHCI controller configurations
+/// Standard 8-port EHCI controller (i.MX RT1062 USB host configuration)
+pub type EhciStandard<State = Uninitialized> = EhciController<8, State>;
+/// Single-port EHCI controller
+pub type EhciSinglePort<State = Uninitialized> = EhciController<1, State>;
+
 use crate::error::{Result, UsbError};
 use bitflags::bitflags;
 
