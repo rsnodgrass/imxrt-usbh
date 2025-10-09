@@ -114,6 +114,7 @@ impl TransferExecutor {
                 .is_ok()
             {
                 // Reset the QH
+                // Safety: We atomically claimed slot free_bit, index is < 32, and we have exclusive access
                 unsafe {
                     QH_POOL[free_bit as usize] = QueueHead::new();
                 }
@@ -152,6 +153,7 @@ impl TransferExecutor {
                 .is_ok()
             {
                 // Reset the qTD
+                // Safety: We atomically claimed slot free_bit, index is < 64, and we have exclusive access
                 unsafe {
                     QTD_POOL[free_bit as usize] = QueueTD::new();
                 }
@@ -181,6 +183,7 @@ impl TransferExecutor {
         if handle.index >= 32 {
             return Err(UsbError::InvalidParameter);
         }
+        // Safety: Index validated < 32, QH_POOL has 32 elements, handle came from alloc_qh
         Ok(unsafe { &QH_POOL[handle.index] })
     }
 
@@ -189,6 +192,7 @@ impl TransferExecutor {
         if handle.index >= 32 {
             return Err(UsbError::InvalidParameter);
         }
+        // Safety: Index validated < 32, QH_POOL has 32 elements, &mut self ensures exclusive access
         Ok(unsafe { &mut QH_POOL[handle.index] })
     }
 
@@ -197,6 +201,7 @@ impl TransferExecutor {
         if handle.index >= 64 {
             return Err(UsbError::InvalidParameter);
         }
+        // Safety: Index validated < 64, QTD_POOL has 64 elements, handle came from alloc_qtd
         Ok(unsafe { &QTD_POOL[handle.index] })
     }
 
@@ -205,6 +210,7 @@ impl TransferExecutor {
         if handle.index >= 64 {
             return Err(UsbError::InvalidParameter);
         }
+        // Safety: Index validated < 64, QTD_POOL has 64 elements, &mut self ensures exclusive access
         Ok(unsafe { &mut QTD_POOL[handle.index] })
     }
 
@@ -213,6 +219,7 @@ impl TransferExecutor {
         if handle.index >= 32 {
             return Err(UsbError::InvalidParameter);
         }
+        // Safety: Index validated < 32, QH_POOL has 32 elements
         let qh = unsafe { &QH_POOL[handle.index] };
         Ok(qh as *const QueueHead as u32)
     }
@@ -222,6 +229,7 @@ impl TransferExecutor {
         if handle.index >= 64 {
             return Err(UsbError::InvalidParameter);
         }
+        // Safety: Index validated < 64, QTD_POOL has 64 elements
         let qtd = unsafe { &QTD_POOL[handle.index] };
         Ok(qtd as *const QueueTD as u32)
     }
@@ -264,6 +272,7 @@ impl TransferExecutor {
 
         {
             let setup_qtd = self.get_qtd_mut(&setup_qtd_handle)?;
+            // Safety: setup_packet is valid 8-byte array, qtd is properly allocated from pool
             unsafe {
                 setup_qtd.init_transfer(
                     token::PID_SETUP,
@@ -291,6 +300,7 @@ impl TransferExecutor {
 
             {
                 let qtd = self.get_qtd_mut(&qtd_handle)?;
+                // Safety: buffer is valid DmaBuffer, pointer and length are correct
                 unsafe {
                     qtd.init_transfer(
                         pid,
@@ -323,6 +333,7 @@ impl TransferExecutor {
 
         {
             let status_qtd = self.get_qtd_mut(&status_qtd_handle)?;
+            // Safety: Zero-length transfer (None), qtd is properly allocated from pool
             unsafe {
                 status_qtd.init_transfer(
                     status_pid, true, // DATA1
@@ -355,6 +366,7 @@ impl TransferExecutor {
         // Link QH to first qTD
         {
             let qh = self.get_qh_mut(&qh_handle)?;
+            // Safety: setup_qtd_addr is valid physical address from allocated qtd
             unsafe {
                 qh.link_qtd(setup_qtd_addr)?;
             }
@@ -424,6 +436,7 @@ impl TransferExecutor {
 
         {
             let qtd = self.get_qtd_mut(&qtd_handle)?;
+            // Safety: buffer is valid DmaBuffer with correct pointer and length
             unsafe {
                 qtd.init_transfer(
                     pid,
@@ -438,6 +451,7 @@ impl TransferExecutor {
         let qtd_addr = self.get_qtd_addr(&qtd_handle)?;
         {
             let qh = self.get_qh_mut(&qh_handle)?;
+            // Safety: qtd_addr is valid physical address from allocated qtd
             unsafe {
                 qh.link_qtd(qtd_addr)?;
             }
@@ -508,6 +522,7 @@ impl TransferExecutor {
 
         {
             let qtd = self.get_qtd_mut(&qtd_handle)?;
+            // Safety: buffer is valid DmaBuffer with correct pointer and length
             unsafe {
                 qtd.init_transfer(
                     pid,
@@ -522,6 +537,7 @@ impl TransferExecutor {
         let qtd_addr = self.get_qtd_addr(&qtd_handle)?;
         {
             let qh = self.get_qh_mut(&qh_handle)?;
+            // Safety: qtd_addr is valid physical address from allocated qtd
             unsafe {
                 qh.link_qtd(qtd_addr)?;
             }
@@ -531,6 +547,7 @@ impl TransferExecutor {
         self.link_qh_to_periodic_schedule(&qh_handle, interval)?;
 
         // Enable periodic schedule if not already running
+        // Safety: op_base is valid EHCI operational base address from initialization
         unsafe {
             super::periodic::enable_periodic_schedule(self.op_base)?;
         }
@@ -552,6 +569,7 @@ impl TransferExecutor {
         let qh_addr = self.get_qh_addr(qh_handle)?;
 
         // Get frame list and scheduler
+        // Safety: get_frame_list returns reference to static FRAME_LIST initialized at startup
         let frame_list = unsafe { super::periodic::get_frame_list() };
         let scheduler = super::periodic::get_scheduler();
 
@@ -559,6 +577,7 @@ impl TransferExecutor {
         let offset = scheduler.find_best_offset(interval);
 
         // Link QH to periodic schedule
+        // Safety: qh_addr is valid physical address, frame_list manages linking safely
         unsafe {
             frame_list.link_qh_periodic(interval, qh_addr)?;
         }
@@ -575,6 +594,7 @@ impl TransferExecutor {
         _qh_handle: &QhHandle,
         interval: u32,
     ) -> Result<()> {
+        // Safety: get_frame_list returns reference to static FRAME_LIST initialized at startup
         let frame_list = unsafe { super::periodic::get_frame_list() };
         let scheduler = super::periodic::get_scheduler();
 
@@ -597,6 +617,7 @@ impl TransferExecutor {
         let op_base = self.op_base;
 
         // Read current async list head
+        // Safety: op_base is valid EHCI operational base, offset 0x18 is ASYNCLISTADDR register
         let asynclistaddr = unsafe { core::ptr::read_volatile((op_base + 0x18) as *const u32) };
 
         // Update QH based on whether async schedule exists
@@ -625,6 +646,7 @@ impl TransferExecutor {
 
         // Set async list head if this is the first QH
         if asynclistaddr == 0 || (asynclistaddr & 1) != 0 {
+            // Safety: Writing to ASYNCLISTADDR register with barriers to ensure visibility
             unsafe {
                 cortex_m::asm::dmb();
                 core::ptr::write_volatile((op_base + 0x18) as *mut u32, qh_addr);
@@ -653,6 +675,7 @@ impl TransferExecutor {
     fn enable_async_schedule(&self) -> Result<()> {
         let usbcmd_addr = self.op_base as *mut u32;
 
+        // Safety: Accessing USBCMD register with proper memory barriers
         unsafe {
             cortex_m::asm::dmb();
             let mut usbcmd = core::ptr::read_volatile(usbcmd_addr);
@@ -666,6 +689,7 @@ impl TransferExecutor {
         let timeout = super::RegisterTimeout::new_ms(10);
 
         timeout.wait_for(|| {
+            // Safety: Reading USBSTS register at offset 0x04 from valid operational base
             let usbsts = unsafe { core::ptr::read_volatile(usbsts_addr) };
             (usbsts & (1 << 15)) != 0 // Async Schedule Status
         })?;
