@@ -35,6 +35,8 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
         for (i, allocated) in self.qh_allocated.iter().enumerate() {
             if !allocated.swap(true, Ordering::Acquire) {
                 let qh_ptr = self.qh_memory[i].as_mut_ptr();
+                // Safety: We atomically claimed this slot, qh_ptr is valid and properly aligned,
+                // write initializes the memory, and returned reference has lifetime of &mut self
                 unsafe {
                     qh_ptr.write(QueueHead::new());
                     return Some(&mut *qh_ptr);
@@ -49,6 +51,8 @@ impl<const N_QH: usize, const N_QTD: usize> UsbDescriptorPool<N_QH, N_QTD> {
         for (i, allocated) in self.qtd_allocated.iter().enumerate() {
             if !allocated.swap(true, Ordering::Acquire) {
                 let qtd_ptr = self.qtd_memory[i].as_mut_ptr();
+                // Safety: We atomically claimed this slot, qtd_ptr is valid and properly aligned,
+                // write initializes the memory, and returned reference has lifetime of &mut self
                 unsafe {
                     qtd_ptr.write(QueueTD::new());
                     return Some(&mut *qtd_ptr);

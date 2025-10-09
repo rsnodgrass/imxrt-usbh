@@ -147,6 +147,7 @@ impl<T> ManagedDescriptor<T> {
         if state == DescriptorState::Free {
             return Err(UsbError::InvalidState);
         }
+        // Safety: NonNull pointer is valid, allocated from pool, and state check ensures not Free
         unsafe { Ok(self.descriptor.as_ref()) }
     }
 
@@ -156,6 +157,7 @@ impl<T> ManagedDescriptor<T> {
         if state == DescriptorState::Free || state == DescriptorState::Active {
             return Err(UsbError::InvalidState);
         }
+        // Safety: NonNull pointer is valid, we have exclusive &mut self, and state ensures not Free/Active
         unsafe { Ok(self.descriptor.as_mut()) }
     }
 }
@@ -191,9 +193,11 @@ impl<const N_QH: usize, const N_QTD: usize> DescriptorAllocator<N_QH, N_QTD> {
 
         for i in 0..N_QH {
             let desc = ManagedDescriptor::new(
+                // Safety: qh_memory[i] is valid, properly aligned, and lives for 'static
                 unsafe { NonNull::new_unchecked(&mut qh_memory[i] as *mut QueueHead) },
                 i,
             );
+            // Safety: qh_ptr is valid for N_QH writes, i < N_QH, and memory is uninitialized
             unsafe {
                 qh_ptr.add(i).write(desc);
             }
@@ -201,16 +205,20 @@ impl<const N_QH: usize, const N_QTD: usize> DescriptorAllocator<N_QH, N_QTD> {
 
         for i in 0..N_QTD {
             let desc = ManagedDescriptor::new(
+                // Safety: qtd_memory[i] is valid, properly aligned, and lives for 'static
                 unsafe { NonNull::new_unchecked(&mut qtd_memory[i] as *mut QueueTD) },
                 i,
             );
+            // Safety: qtd_ptr is valid for N_QTD writes, i < N_QTD, and memory is uninitialized
             unsafe {
                 qtd_ptr.add(i).write(desc);
             }
         }
 
         Self {
+            // Safety: All N_QH elements initialized in loop above
             qh_descriptors: unsafe { qh_descriptors.assume_init() },
+            // Safety: All N_QTD elements initialized in loop above
             qtd_descriptors: unsafe { qtd_descriptors.assume_init() },
             stats: AllocationStats::new(),
         }

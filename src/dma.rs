@@ -171,6 +171,7 @@ pub unsafe fn init_dma_region() -> Result<()> {
     crate::safety::BoundsChecker::validate_alignment(region_addr, DMA_ALIGNMENT)?;
 
     // Validate cache line alignment for data buffers
+    // Safety: Taking address of static DMA_REGION field, no dereference occurs
     unsafe {
         let buffer_addr = &raw const DMA_REGION.data_buffers as usize;
         const DCACHE_LINE_SIZE: usize = 32;
@@ -180,6 +181,7 @@ pub unsafe fn init_dma_region() -> Result<()> {
     }
 
     // Configure MPU for non-cacheable DMA region
+    // Safety: configure_mpu_dma_region validates region bounds and configures MPU registers
     unsafe {
         configure_mpu_dma_region(region_addr, region_size)?;
     }
@@ -206,12 +208,14 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
     const MPU_RASR_XN: u32 = 1 << 28; // Execute never
 
     // Disable MPU during configuration
+    // Safety: Accessing MPU peripheral registers, disabling MPU before reconfiguration
     unsafe {
         let mpu = &*cortex_m::peripheral::MPU::PTR;
         mpu.ctrl.write(0); // Disable MPU
     }
 
     // Configure region 7 for DMA
+    // Safety: MPU disabled, configuring region 7 with non-cacheable attributes for DMA
     unsafe {
         (*MPU::PTR).rnr.write(7); // Select region 7
         (*MPU::PTR).rbar.write(addr as u32 & !0x1F); // Base address (32-byte aligned)
@@ -226,6 +230,7 @@ unsafe fn configure_mpu_dma_region(addr: usize, _size: usize) -> Result<()> {
     }
 
     // Enable MPU with default memory map for privileged mode
+    // Safety: Re-enabling MPU with configured regions, followed by barriers to ensure effect
     unsafe {
         (*MPU::PTR)
             .ctrl
@@ -369,6 +374,7 @@ pub mod cache_ops {
     ///
     /// Caller must ensure addr/size represent a valid memory region.
     unsafe fn cache_op(op: CacheOp, addr: usize, size: usize) {
+        // Safety: Precondition requires valid memory region, cache operations aligned to lines
         unsafe {
             dsb(); // Ensure all previous operations complete
 
@@ -388,16 +394,19 @@ pub mod cache_ops {
 
     /// Clean data cache (write dirty lines to memory)
     pub fn clean_dcache(addr: usize, size: usize) {
+        // Safety: cache_op performs proper alignment and cache maintenance
         unsafe { cache_op(CacheOp::Clean, addr, size) }
     }
 
     /// Invalidate data cache (discard cached data, re-read from memory)
     pub fn invalidate_dcache(addr: usize, size: usize) {
+        // Safety: cache_op performs proper alignment and cache maintenance
         unsafe { cache_op(CacheOp::Invalidate, addr, size) }
     }
 
     /// Clean and invalidate data cache (write dirty lines, then discard)
     pub fn clean_invalidate_dcache(addr: usize, size: usize) {
+        // Safety: cache_op performs proper alignment and cache maintenance
         unsafe { cache_op(CacheOp::CleanInvalidate, addr, size) }
     }
 
@@ -436,12 +445,14 @@ impl DmaBufferPool {
         for (i, allocated) in self.allocated.iter().enumerate() {
             if !allocated.swap(true, Ordering::Acquire) {
                 // Buffer was free, now allocated
+                // Safety: Accessing static DMA_REGION buffer at valid index i < N_BUFFERS
                 let addr = unsafe { DMA_REGION.data_buffers[i].as_ptr() as *mut u8 };
 
                 // Validate buffer bounds
                 crate::safety::BoundsChecker::validate_buffer(addr, size)?;
                 crate::safety::BoundsChecker::validate_dma_buffer(addr as usize, size)?;
 
+                // Safety: addr is non-null pointer from static array, validated above
                 let ptr = unsafe { NonNull::new_unchecked(addr) };
 
                 let buffer = DmaBuffer {
