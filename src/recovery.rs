@@ -211,13 +211,19 @@ impl RecoveryCoordinator {
 
     /// Reset port
     fn reset_port(&mut self, controller: Option<&mut EhciController<8>>) -> Result<()> {
-        if controller.is_none() {
-            return Err(UsbError::InvalidParameter);
-        }
+        let controller = controller.ok_or(UsbError::InvalidParameter)?;
 
         unsafe {
+            // Get correct controller base address (NOT hardcoded USB1!)
+            let base_addr = controller.base_address();
+            let cap_base = core::ptr::read_volatile(base_addr as *const u32);
+            let cap_length = (cap_base & 0xFF) as usize;
+            let op_base = base_addr + cap_length;
+
+            // PORTSC[0] is at operational_base + 0x44
+            let portsc_addr = (op_base + 0x44) as *mut u32;
+
             // Set port reset bit
-            let portsc_addr = (0x402E_0184) as *mut u32; // PORTSC[0]
             cortex_m::asm::dmb(); // ensure prior ops complete before MMIO read
             let mut portsc = core::ptr::read_volatile(portsc_addr);
             cortex_m::asm::dmb(); // ensure read completes before modify
@@ -226,8 +232,8 @@ impl RecoveryCoordinator {
             core::ptr::write_volatile(portsc_addr, portsc);
             cortex_m::asm::dsb(); // ensure write completes before continuing
 
-            // Wait for reset to complete (10ms minimum per USB spec)
-            self.delay_ms(10);
+            // Wait for reset to complete (20ms per USB 2.0 spec recommendation)
+            self.delay_ms(20);
 
             // Clear reset bit
             cortex_m::asm::dmb();
@@ -252,22 +258,39 @@ impl RecoveryCoordinator {
     fn reset_controller(
         &mut self,
         phy: Option<&mut UsbPhy>,
-        _controller: Option<&mut EhciController<8>>,
+        controller: Option<&mut EhciController<8>>,
     ) -> Result<()> {
+        let controller = controller.ok_or(UsbError::InvalidParameter)?;
+
         #[cfg(feature = "defmt")]
         defmt::warn!("Resetting USB controller");
 
         // Stop controller
         unsafe {
-            let usbcmd_addr = (0x402E_0140) as *mut u32; // USBCMD
+            // Get correct controller base address (NOT hardcoded USB1!)
+            let base_addr = controller.base_address();
+            let cap_base = core::ptr::read_volatile(base_addr as *const u32);
+            let cap_length = (cap_base & 0xFF) as usize;
+            let op_base = base_addr + cap_length;
+
+            // USBCMD is at operational_base + 0x00
+            let usbcmd_addr = (op_base + 0x00) as *mut u32;
+            cortex_m::asm::dmb();
             let mut cmd = core::ptr::read_volatile(usbcmd_addr);
+            cortex_m::asm::dmb();
             cmd &= !(1 << 0); // Clear Run/Stop
+            cortex_m::asm::dmb();
             core::ptr::write_volatile(usbcmd_addr, cmd);
+            cortex_m::asm::dsb();
 
             // Wait for halt
+            // USBSTS is at operational_base + 0x04
+            let usbsts_addr = (op_base + 0x04) as *const u32;
             let mut timeout = 1000;
             loop {
-                let status = core::ptr::read_volatile((0x402E_0144) as *const u32);
+                cortex_m::asm::dmb();
+                let status = core::ptr::read_volatile(usbsts_addr);
+                cortex_m::asm::dmb();
                 if status & (1 << 12) != 0 {
                     // HCHalted
                     break;
@@ -280,13 +303,20 @@ impl RecoveryCoordinator {
             }
 
             // Reset controller
+            cortex_m::asm::dmb();
+            cmd = core::ptr::read_volatile(usbcmd_addr);
+            cortex_m::asm::dmb();
             cmd |= 1 << 1; // Host Controller Reset
+            cortex_m::asm::dmb();
             core::ptr::write_volatile(usbcmd_addr, cmd);
+            cortex_m::asm::dsb();
 
             // Wait for reset to complete
             timeout = 1000;
             loop {
+                cortex_m::asm::dmb();
                 cmd = core::ptr::read_volatile(usbcmd_addr);
+                cortex_m::asm::dmb();
                 if cmd & (1 << 1) == 0 {
                     break;
                 }

@@ -382,9 +382,15 @@ impl UsbInterruptHandler {
     }
 
     /// Process port change event
-    pub fn handle_port_change_event(&self, port: u8) -> Result<()> {
+    pub fn handle_port_change_event(&self, port: u8, usb_base: usize) -> Result<()> {
         unsafe {
-            let portsc_addr = (0x402E_0184 + (port as usize * 4)) as *mut u32;
+            // Calculate PORTSC address from base (NOT hardcoded USB1!)
+            // PORTSC[0] is at operational_base + 0x44, but we need to calculate operational base
+            let cap_base = core::ptr::read_volatile(usb_base as *const u32);
+            let cap_length = (cap_base & 0xFF) as usize;
+            let op_base = usb_base + cap_length;
+            let portsc_addr = (op_base + 0x44 + (port as usize * 4)) as *mut u32;
+
             cortex_m::asm::dmb(); // ensure prior ops complete before PORTSC read
             let portsc = core::ptr::read_volatile(portsc_addr);
             cortex_m::asm::dmb(); // ensure read completes before using value

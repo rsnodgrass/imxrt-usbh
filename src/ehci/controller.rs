@@ -42,9 +42,13 @@ where
     /// The caller must ensure exclusive access to the EHCI controller at base_addr
     pub unsafe fn new(base_addr: usize) -> Result<Self> {
         // Read capability registers to validate hardware configuration
+        cortex_m::asm::dmb();
         let _cap_base = unsafe { core::ptr::read_volatile((base_addr + 0x00) as *const u32) };
+        cortex_m::asm::dmb();
         let hcsparams = unsafe { core::ptr::read_volatile((base_addr + 0x04) as *const u32) };
+        cortex_m::asm::dmb();
         let hccparams = unsafe { core::ptr::read_volatile((base_addr + 0x08) as *const u32) };
+        cortex_m::asm::dmb();
 
         let hw_port_count = (hcsparams & 0xF) as usize;
 
@@ -69,14 +73,20 @@ where
 
         // Reset controller (RM 66.6.10 USBCMD[1])
         let usbcmd_ptr = (op_base + 0x00) as *mut u32;
+        cortex_m::asm::dmb();
         let mut usbcmd = unsafe { core::ptr::read_volatile(usbcmd_ptr) };
+        cortex_m::asm::dmb();
         usbcmd |= 0x02; // HC Reset
+        cortex_m::asm::dmb();
         unsafe { core::ptr::write_volatile(usbcmd_ptr, usbcmd) };
+        cortex_m::asm::dsb();
 
         // Wait for reset completion with timeout
         let timeout = RegisterTimeout::new_us(10_000);
         timeout.wait_for(|| {
+            cortex_m::asm::dmb();
             let cmd = unsafe { core::ptr::read_volatile(usbcmd_ptr) };
+            cortex_m::asm::dmb();
             (cmd & 0x02) == 0 // Reset bit clears when complete
         })?;
 
@@ -100,9 +110,13 @@ where
         let op_base = self.operational_base();
         let usbcmd_ptr = (op_base + 0x00) as *mut u32;
 
+        cortex_m::asm::dmb();
         let mut usbcmd = unsafe { core::ptr::read_volatile(usbcmd_ptr) };
+        cortex_m::asm::dmb();
         usbcmd |= 0x01; // Run/Stop bit
+        cortex_m::asm::dmb();
         unsafe { core::ptr::write_volatile(usbcmd_ptr, usbcmd) };
+        cortex_m::asm::dsb();
 
         EhciController {
             base_addr: self.base_addr,
@@ -144,15 +158,24 @@ where
         }
         let op_base = self.operational_base();
         let portsc_ptr = (op_base + 0x44 + (port * 4)) as *const u32;
+        cortex_m::asm::dmb();
         let portsc_val = unsafe { core::ptr::read_volatile(portsc_ptr) };
+        cortex_m::asm::dmb();
         Ok(PortSc::from_bits_truncate(portsc_val))
     }
 
     /// Get operational registers base address
     fn operational_base(&self) -> usize {
+        cortex_m::asm::dmb();
         let cap_base = unsafe { core::ptr::read_volatile(self.base_addr as *const u32) };
+        cortex_m::asm::dmb();
         let cap_length = (cap_base & 0xFF) as usize;
         self.base_addr + cap_length
+    }
+
+    /// Get controller base address (for recovery operations)
+    pub fn base_address(&self) -> usize {
+        self.base_addr
     }
 }
 
@@ -170,7 +193,9 @@ where
     pub fn status(&self) -> UsbSts {
         let op_base = self.operational_base();
         let usbsts_ptr = (op_base + 0x04) as *const u32;
+        cortex_m::asm::dmb();
         let status_val = unsafe { core::ptr::read_volatile(usbsts_ptr) };
+        cortex_m::asm::dmb();
         UsbSts::from_bits_truncate(status_val)
     }
 }
