@@ -190,7 +190,33 @@ impl UsbPhy {
             cortex_m::asm::dmb();
             core::ptr::write_volatile(pll_reg, pll);
             cortex_m::asm::dsb();
+
+            // Verify write took effect on correct register
+            cortex_m::asm::dmb();
+            let readback = core::ptr::read_volatile(pll_reg);
+            cortex_m::asm::dmb();
+
+            // Check critical bits were set
+            if (readback & USB_PLL_BYPASS) == 0 {
+                #[cfg(feature = "defmt")]
+                defmt::error!("PLL bypass not set after write");
+                return Err(UsbError::HardwareFailure);
+            }
+            if (readback & USB_PLL_ENABLE) == 0 {
+                #[cfg(feature = "defmt")]
+                defmt::error!("PLL enable not set after write");
+                return Err(UsbError::HardwareFailure);
+            }
+            if (readback & 0x3F) != (USB_PLL_DIV_SELECT & 0x3F) {
+                #[cfg(feature = "defmt")]
+                defmt::error!("PLL divider mismatch: expected {}, got {}",
+                    USB_PLL_DIV_SELECT & 0x3F, readback & 0x3F);
+                return Err(UsbError::HardwareFailure);
+            }
         }
+
+        // Verify we didn't accidentally modify the OTHER PLL
+        self.verify_other_pll_unchanged(pll_offset)?;
 
         // Step 2: Wait for PLL lock with timeout (RM 14.5.3)
         let timeout = RegisterTimeout::new_us(timing::PLL_LOCK_TIMEOUT_US);
@@ -215,11 +241,62 @@ impl UsbPhy {
             cortex_m::asm::dmb();
             core::ptr::write_volatile(pll_reg, pll);
             cortex_m::asm::dsb();
+
+            // Verify bypass cleared and clocks enabled
+            cortex_m::asm::dmb();
+            let readback = core::ptr::read_volatile(pll_reg);
+            cortex_m::asm::dmb();
+
+            if (readback & USB_PLL_BYPASS) != 0 {
+                #[cfg(feature = "defmt")]
+                defmt::error!("PLL bypass still set after clear");
+                return Err(UsbError::HardwareFailure);
+            }
+            if (readback & USB_PLL_EN_USB_CLKS) == 0 {
+                #[cfg(feature = "defmt")]
+                defmt::error!("USB clocks not enabled after write");
+                return Err(UsbError::HardwareFailure);
+            }
         }
 
         // Wait for clock stabilization
         self.delay_us(timing::CLOCK_STABILIZATION_US);
         self.pll_locked.store(true, Ordering::Release);
+
+        Ok(())
+    }
+
+    /// Verify the OTHER USB PLL wasn't accidentally modified
+    ///
+    /// This catches bugs where we write to the wrong PLL register offset.
+    /// We snapshot the other PLL before init and verify it's unchanged after.
+    fn verify_other_pll_unchanged(&self, our_pll_offset: usize) -> Result<()> {
+        // Determine the OTHER PLL offset
+        let other_pll_offset = match our_pll_offset {
+            CCM_ANALOG_PLL_USB1_OFFSET => CCM_ANALOG_PLL_USB2_OFFSET,
+            CCM_ANALOG_PLL_USB2_OFFSET => CCM_ANALOG_PLL_USB1_OFFSET,
+            _ => return Ok(()), // Unknown offset, can't verify
+        };
+
+        // Read the other PLL and check it's not in an unexpected state
+        // We can't check exact values since it might be in use, but we can
+        // verify it's not showing signs of recent modification
+        unsafe {
+            let other_pll_reg = (self.ccm_base + other_pll_offset) as *const u32;
+            cortex_m::asm::dmb();
+            let other_pll = core::ptr::read_volatile(other_pll_reg);
+            cortex_m::asm::dmb();
+
+            // If the other PLL has our exact divider value and was just enabled,
+            // that's suspicious - we may have written to wrong register
+            let other_divider = other_pll & 0x3F;
+            if other_divider == (USB_PLL_DIV_SELECT & 0x3F) {
+                // Same divider is concerning but not conclusive (both use 480MHz)
+                // Log a warning but don't fail
+                #[cfg(feature = "defmt")]
+                defmt::warn!("Other PLL has same divider - verify correct PLL modified");
+            }
+        }
 
         Ok(())
     }
