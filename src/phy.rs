@@ -3,7 +3,9 @@
 //! Based on i.MX RT1060 Reference Manual sections 14.4-14.5 and 66.5
 //! Implements embedded systems best practices for hardware timing and error recovery
 
-use crate::ehci::RegisterTimeout;
+use crate::ehci::{
+    clear_bits_at, modify_register_at, read_register_at, set_bits_at, RegisterTimeout,
+};
 use crate::error::{Result, UsbError};
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 // TODO: Fix RAL API usage after determining correct register names
@@ -140,28 +142,16 @@ impl UsbPhy {
 
     /// Reset the USB PHY with proper timing
     fn reset_phy(&mut self) -> Result<()> {
+        let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+
         // Assert soft reset (RM 66.5.1.2 step 1)
-        unsafe {
-            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
-            cortex_m::asm::dmb();
-            let mut ctrl = core::ptr::read_volatile(ctrl_reg);
-            ctrl |= USBPHY_CTRL_SFTRST;
-            core::ptr::write_volatile(ctrl_reg, ctrl);
-            cortex_m::asm::dsb();
-        }
+        unsafe { set_bits_at(ctrl_reg, USBPHY_CTRL_SFTRST) };
 
         // Hold reset for minimum time (RM timing requirement)
         self.delay_us(timing::PHY_RESET_HOLD_TIME_US);
 
         // Deassert soft reset and clock gate
-        unsafe {
-            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
-            cortex_m::asm::dmb();
-            let mut ctrl = core::ptr::read_volatile(ctrl_reg);
-            ctrl &= !(USBPHY_CTRL_SFTRST | USBPHY_CTRL_CLKGATE);
-            core::ptr::write_volatile(ctrl_reg, ctrl);
-            cortex_m::asm::dsb();
-        }
+        unsafe { clear_bits_at(ctrl_reg, USBPHY_CTRL_SFTRST | USBPHY_CTRL_CLKGATE) };
 
         // Wait for PHY to stabilize
         self.delay_us(timing::PHY_POWER_STABILIZATION_US);
@@ -175,28 +165,22 @@ impl UsbPhy {
         let pll_offset = self.get_pll_offset();
 
         // Step 1: Set bypass and configure PLL (RM 14.5.3)
+        let pll_reg = (self.ccm_base + pll_offset) as *mut u32;
+
         unsafe {
-            let pll_reg = (self.ccm_base + pll_offset) as *mut u32;
-            cortex_m::asm::dmb();
-            let mut pll = core::ptr::read_volatile(pll_reg);
-            cortex_m::asm::dmb();
-
-            // Set bypass before modifying PLL configuration (RM requirement)
-            pll |= USB_PLL_BYPASS;
-
-            // Configure divider and enable PLL
-            pll &= !0x3F; // Clear divider field
-            pll |= USB_PLL_DIV_SELECT & 0x3F;
-            pll |= USB_PLL_ENABLE | USB_PLL_POWER;
-
-            cortex_m::asm::dmb();
-            core::ptr::write_volatile(pll_reg, pll);
-            cortex_m::asm::dsb();
+            modify_register_at(pll_reg, |pll| {
+                let mut pll = pll;
+                // Set bypass before modifying PLL configuration (RM requirement)
+                pll |= USB_PLL_BYPASS;
+                // Configure divider and enable PLL
+                pll &= !0x3F; // Clear divider field
+                pll |= USB_PLL_DIV_SELECT & 0x3F;
+                pll |= USB_PLL_ENABLE | USB_PLL_POWER;
+                pll
+            });
 
             // Verify write took effect on correct register
-            cortex_m::asm::dmb();
-            let readback = core::ptr::read_volatile(pll_reg);
-            cortex_m::asm::dmb();
+            let readback = read_register_at(pll_reg);
 
             // Check critical bits were set
             if (readback & USB_PLL_BYPASS) == 0 {
@@ -224,30 +208,22 @@ impl UsbPhy {
         let timeout = RegisterTimeout::new_us(timing::PLL_LOCK_TIMEOUT_US);
         timeout
             .wait_for(|| unsafe {
-                let pll_reg = (self.ccm_base + pll_offset) as *const u32;
-                cortex_m::asm::dmb();
-                let pll = core::ptr::read_volatile(pll_reg);
-                cortex_m::asm::dmb();
+                let pll = read_register_at(pll_reg);
                 (pll & USB_PLL_LOCK) != 0
             })
             .map_err(|_| UsbError::HardwareFailure)?;
 
         // Step 3: Clear bypass after lock confirmed (RM requirement)
         unsafe {
-            let pll_reg = (self.ccm_base + pll_offset) as *mut u32;
-            cortex_m::asm::dmb();
-            let mut pll = core::ptr::read_volatile(pll_reg);
-            cortex_m::asm::dmb();
-            pll &= !USB_PLL_BYPASS;
-            pll |= USB_PLL_EN_USB_CLKS;
-            cortex_m::asm::dmb();
-            core::ptr::write_volatile(pll_reg, pll);
-            cortex_m::asm::dsb();
+            modify_register_at(pll_reg, |pll| {
+                let mut pll = pll;
+                pll &= !USB_PLL_BYPASS;
+                pll |= USB_PLL_EN_USB_CLKS;
+                pll
+            });
 
             // Verify bypass cleared and clocks enabled
-            cortex_m::asm::dmb();
-            let readback = core::ptr::read_volatile(pll_reg);
-            cortex_m::asm::dmb();
+            let readback = read_register_at(pll_reg);
 
             if (readback & USB_PLL_BYPASS) != 0 {
                 #[cfg(feature = "defmt")]
@@ -283,21 +259,17 @@ impl UsbPhy {
         // Read the other PLL and check it's not in an unexpected state
         // We can't check exact values since it might be in use, but we can
         // verify it's not showing signs of recent modification
-        unsafe {
-            let other_pll_reg = (self.ccm_base + other_pll_offset) as *const u32;
-            cortex_m::asm::dmb();
-            let other_pll = core::ptr::read_volatile(other_pll_reg);
-            cortex_m::asm::dmb();
+        let other_pll_reg = (self.ccm_base + other_pll_offset) as *const u32;
+        let other_pll = unsafe { read_register_at(other_pll_reg) };
 
-            // If the other PLL has our exact divider value and was just enabled,
-            // that's suspicious - we may have written to wrong register
-            let other_divider = other_pll & 0x3F;
-            if other_divider == (USB_PLL_DIV_SELECT & 0x3F) {
-                // Same divider is concerning but not conclusive (both use 480MHz)
-                // Log a warning but don't fail
-                #[cfg(feature = "defmt")]
-                defmt::warn!("Other PLL has same divider - verify correct PLL modified");
-            }
+        // If the other PLL has our exact divider value and was just enabled,
+        // that's suspicious - we may have written to wrong register
+        let other_divider = other_pll & 0x3F;
+        if other_divider == (USB_PLL_DIV_SELECT & 0x3F) {
+            // Same divider is concerning but not conclusive (both use 480MHz)
+            // Log a warning but don't fail
+            #[cfg(feature = "defmt")]
+            defmt::warn!("Other PLL has same divider - verify correct PLL modified");
         }
 
         Ok(())
@@ -306,18 +278,10 @@ impl UsbPhy {
     /// Power up PHY with monitored sequencing
     fn power_up_phy(&mut self) -> Result<()> {
         // Power up PHY (RM 66.5.1.3)
-        unsafe {
-            let pwr_reg = (self.phy_base + 0x00) as *mut u32;
-            cortex_m::asm::dmb();
-            let mut pwr = core::ptr::read_volatile(pwr_reg);
-            cortex_m::asm::dmb();
+        let pwr_reg = (self.phy_base + 0x00) as *mut u32;
 
-            // Clear power-down bits
-            pwr &= !(1 << 10); // PWDN bit
-            cortex_m::asm::dmb();
-            core::ptr::write_volatile(pwr_reg, pwr);
-            cortex_m::asm::dsb();
-        }
+        // Clear power-down bits
+        unsafe { clear_bits_at(pwr_reg, 1 << 10) }; // PWDN bit
 
         // Wait for power stabilization with verification
         self.delay_us(timing::PHY_POWER_STABILIZATION_US);
@@ -330,49 +294,32 @@ impl UsbPhy {
 
     /// Configure PHY for host mode operation
     fn configure_host_mode(&mut self) -> Result<()> {
+        let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+
+        // Enable host mode features
         unsafe {
-            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
-            cortex_m::asm::dmb();
-            let mut ctrl = core::ptr::read_volatile(ctrl_reg);
-            cortex_m::asm::dmb();
-
-            // Enable host mode features
-            ctrl |= USBPHY_CTRL_ENHOSTDISCONDETECT;
-            ctrl |= USBPHY_CTRL_HOSTDISCONDETECT_IRQ;
-
-            cortex_m::asm::dmb();
-            core::ptr::write_volatile(ctrl_reg, ctrl);
-            cortex_m::asm::dsb();
-        }
+            set_bits_at(
+                ctrl_reg,
+                USBPHY_CTRL_ENHOSTDISCONDETECT | USBPHY_CTRL_HOSTDISCONDETECT_IRQ,
+            )
+        };
 
         Ok(())
     }
 
     /// Calibrate PHY with timeout and verification
     fn calibrate_phy(&mut self) -> Result<()> {
+        let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+
         // Start calibration sequence (RM 66.5.1.5)
-        unsafe {
-            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
-            cortex_m::asm::dmb();
-            let mut ctrl = core::ptr::read_volatile(ctrl_reg);
-            cortex_m::asm::dmb();
-            ctrl |= 1 << 16; // Start calibration
-            cortex_m::asm::dmb();
-            core::ptr::write_volatile(ctrl_reg, ctrl);
-            cortex_m::asm::dsb();
-        }
+        unsafe { set_bits_at(ctrl_reg, 1 << 16) }; // Start calibration
 
         // Wait for calibration completion
         let timeout = RegisterTimeout::new_us(timing::PHY_CALIBRATION_TIMEOUT_US);
         timeout
             .wait_for(|| {
-                unsafe {
-                    let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
-                    cortex_m::asm::dmb();
-                    let ctrl = core::ptr::read_volatile(ctrl_reg);
-                    cortex_m::asm::dmb();
-                    (ctrl & (1 << 17)) != 0 // Calibration done
-                }
+                let ctrl = unsafe { read_register_at(ctrl_reg) };
+                (ctrl & (1 << 17)) != 0 // Calibration done
             })
             .map_err(|_| UsbError::HardwareFailure)?;
 
@@ -382,29 +329,17 @@ impl UsbPhy {
 
     /// Enable host disconnect detection with debouncing
     fn enable_host_disconnect_detect(&mut self) {
-        unsafe {
-            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
-            cortex_m::asm::dmb();
-            let mut ctrl = core::ptr::read_volatile(ctrl_reg);
-            cortex_m::asm::dmb();
-            ctrl |= USBPHY_CTRL_ENHOSTDISCONDETECT;
-            cortex_m::asm::dmb();
-            core::ptr::write_volatile(ctrl_reg, ctrl);
-            cortex_m::asm::dsb();
-        }
+        let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+        unsafe { set_bits_at(ctrl_reg, USBPHY_CTRL_ENHOSTDISCONDETECT) };
     }
 
     /// Verify PHY is responding to register accesses
     fn verify_phy_response(&mut self) -> Result<()> {
         // Read CTRL register to verify PHY is accessible
         // (No test register exists in USBPHY per RM 66.6)
-        unsafe {
-            let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
-            cortex_m::asm::dmb();
-            let _ctrl = core::ptr::read_volatile(ctrl_reg);
-            cortex_m::asm::dmb();
-            // If read succeeds without bus fault, PHY is responding
-        }
+        let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
+        let _ctrl = unsafe { read_register_at(ctrl_reg) };
+        // If read succeeds without bus fault, PHY is responding
 
         Ok(())
     }

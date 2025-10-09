@@ -3,6 +3,7 @@
 //! EHCI periodic schedule uses a 1024-entry frame list for time-sensitive transfers.
 //! Each entry can point to Queue Heads (for interrupt) or iTD/siTD (for isochronous).
 
+use crate::ehci::{read_register_at, set_bits_at, clear_bits_at, write_register_at};
 use crate::error::{Result, UsbError};
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -122,13 +123,9 @@ impl PeriodicFrameList {
     ///
     /// * `op_base` - EHCI operational register base address
     pub fn current_frame_index(op_base: usize) -> u32 {
-        unsafe {
-            let frindex_ptr = (op_base + 0x0C) as *const u32;
-            cortex_m::asm::dmb();
-            let frindex = core::ptr::read_volatile(frindex_ptr);
-            cortex_m::asm::dmb();
-            (frindex >> 3) & 0x3FF // Bits 12:3, mask to 1024 frames
-        }
+        let frindex_ptr = (op_base + 0x0C) as *const u32;
+        let frindex = unsafe { read_register_at(frindex_ptr) };
+        (frindex >> 3) & 0x3FF // Bits 12:3, mask to 1024 frames
     }
 }
 
@@ -243,9 +240,7 @@ pub unsafe fn init_periodic_schedule(op_base: usize) -> Result<()> {
     }
 
     unsafe {
-        cortex_m::asm::dmb();
-        core::ptr::write_volatile((op_base + 0x14) as *mut u32, base_addr);
-        cortex_m::asm::dsb();
+        write_register_at((op_base + 0x14) as *mut u32, base_addr);
     }
 
     Ok(())
@@ -260,11 +255,7 @@ pub unsafe fn enable_periodic_schedule(op_base: usize) -> Result<()> {
     let usbcmd_ptr = op_base as *mut u32;
 
     unsafe {
-        cortex_m::asm::dmb();
-        let mut usbcmd = core::ptr::read_volatile(usbcmd_ptr);
-        usbcmd |= 1 << 4; // Periodic Schedule Enable bit
-        core::ptr::write_volatile(usbcmd_ptr, usbcmd);
-        cortex_m::asm::dsb();
+        set_bits_at(usbcmd_ptr, 1 << 4); // Periodic Schedule Enable bit
     }
 
     // Wait for periodic schedule to start
@@ -272,7 +263,7 @@ pub unsafe fn enable_periodic_schedule(op_base: usize) -> Result<()> {
     let timeout = super::RegisterTimeout::new_ms(10);
 
     timeout.wait_for(|| {
-        let usbsts = unsafe { core::ptr::read_volatile(usbsts_ptr) };
+        let usbsts = unsafe { read_register_at(usbsts_ptr) };
         (usbsts & (1 << 14)) != 0 // Periodic Schedule Status bit
     })?;
 
@@ -284,11 +275,7 @@ pub fn disable_periodic_schedule(op_base: usize) -> Result<()> {
     let usbcmd_ptr = op_base as *mut u32;
 
     unsafe {
-        cortex_m::asm::dmb();
-        let mut usbcmd = core::ptr::read_volatile(usbcmd_ptr);
-        usbcmd &= !(1 << 4); // Clear Periodic Schedule Enable
-        core::ptr::write_volatile(usbcmd_ptr, usbcmd);
-        cortex_m::asm::dsb();
+        clear_bits_at(usbcmd_ptr, 1 << 4); // Clear Periodic Schedule Enable
     }
 
     // Wait for schedule to stop
@@ -296,7 +283,7 @@ pub fn disable_periodic_schedule(op_base: usize) -> Result<()> {
     let timeout = super::RegisterTimeout::new_ms(10);
 
     timeout.wait_for(|| {
-        let usbsts = unsafe { core::ptr::read_volatile(usbsts_ptr) };
+        let usbsts = unsafe { read_register_at(usbsts_ptr) };
         (usbsts & (1 << 14)) == 0 // Periodic Schedule Status cleared
     })?;
 
