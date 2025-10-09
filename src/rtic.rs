@@ -67,6 +67,7 @@ impl<T, const N: usize> EventRingBuffer<T, N> {
     pub const fn new() -> Self {
         const UNINIT: core::mem::MaybeUninit<()> = core::mem::MaybeUninit::uninit();
         Self {
+            // Safety: transmuting MaybeUninit<()> to MaybeUninit<T> is valid - both are uninitialized
             buffer: [unsafe { core::mem::transmute(UNINIT) }; N],
             head: AtomicU8::new(0),
             tail: AtomicU8::new(0),
@@ -102,6 +103,7 @@ impl<T, const N: usize> EventRingBuffer<T, N> {
             ) {
                 Ok(_) => {
                     // SUCCESS: We atomically claimed slot at current_head
+                    // Safety: current_head < N (masked), buffer has N slots, we atomically claimed this slot
                     unsafe {
                         let slot = &self.buffer[current_head as usize] as *const _
                             as *mut core::mem::MaybeUninit<T>;
@@ -152,6 +154,7 @@ impl<T, const N: usize> EventRingBuffer<T, N> {
             ) {
                 Ok(_) => {
                     // SUCCESS: We atomically claimed slot at current_tail
+                    // Safety: current_tail < N (masked), buffer has N slots, slot was initialized by push
                     let item = unsafe {
                         let slot = &self.buffer[current_tail as usize];
                         slot.assume_init_read()
@@ -308,6 +311,7 @@ impl UsbInterruptHandler {
     #[inline(always)]
     fn read_port_status_fast(&self) -> u32 {
         // Direct register access for minimal latency
+        // Safety: 0x402E_0044 is valid PORTSC[0] register address for USB2 on i.MX RT1062
         unsafe {
             core::ptr::read_volatile(0x402E_0044 as *const u32) // PORTSC[0]
         }
@@ -316,6 +320,7 @@ impl UsbInterruptHandler {
     /// Clear interrupt status with minimal cycles
     #[inline(always)]
     fn clear_interrupt_status(&self, status: u32) {
+        // Safety: 0x402E_0004 is valid USBSTS register address for USB2 on i.MX RT1062
         unsafe {
             core::ptr::write_volatile(0x402E_0004 as *mut u32, status); // USBSTS
         }
@@ -324,6 +329,7 @@ impl UsbInterruptHandler {
     /// Emergency VBUS shutdown for over-current protection
     #[inline(never)]
     fn emergency_vbus_shutdown(&self) {
+        // Safety: 0x402E_0044 is valid PORTSC[0] register, emergency context justifies direct access
         unsafe {
             // Immediately disable VBUS power
             let portsc = 0x402E_0044 as *mut u32;
@@ -335,6 +341,7 @@ impl UsbInterruptHandler {
 
     /// Emergency controller reset for system errors
     fn emergency_controller_reset(&self) -> Result<()> {
+        // Safety: 0x402E_0000 is valid USBCMD register, emergency context justifies direct access
         unsafe {
             // Assert controller reset
             let usbcmd = 0x402E_0000 as *mut u32;
@@ -347,6 +354,7 @@ impl UsbInterruptHandler {
 
     /// Emergency port disable for critical port errors
     fn emergency_port_disable(&self) {
+        // Safety: 0x402E_0044 is valid PORTSC[0] register, emergency context justifies direct access
         unsafe {
             let portsc = 0x402E_0044 as *mut u32;
             let mut port = core::ptr::read_volatile(portsc);
@@ -358,6 +366,7 @@ impl UsbInterruptHandler {
     /// Clear host system error interrupt
     #[inline(always)]
     fn clear_host_system_error(&self) {
+        // Safety: 0x402E_0004 is valid USBSTS register, write-1-to-clear HSE bit
         unsafe {
             core::ptr::write_volatile(0x402E_0004 as *mut u32, 1 << 4); // Clear HSE bit
         }

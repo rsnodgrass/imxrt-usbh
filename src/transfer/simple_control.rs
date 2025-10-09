@@ -103,6 +103,8 @@ impl SimpleControlTransfer {
         let setup_bytes: [u8; 8] = unsafe { core::mem::transmute_copy(&self.setup) };
 
         // Execute control transfer via TransferExecutor
+        // Safety: setup_bytes is valid for duration of call, data_buffer (if Some) is DmaBuffer
+        // from pool that remains valid until stored in self.data_buffer after transfer completes
         let bytes_transferred = unsafe {
             executor.execute_control_transfer(
                 self.device_address,

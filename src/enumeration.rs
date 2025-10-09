@@ -92,6 +92,8 @@ impl DeviceDescriptor {
             return Err(UsbError::InvalidDescriptor);
         }
 
+        // Safety: data length validated >= 18 bytes (sizeof DeviceDescriptor), read_unaligned
+        // handles potentially misaligned USB descriptor data from device
         unsafe { Ok(core::ptr::read_unaligned(data.as_ptr() as *const Self)) }
     }
 
@@ -566,9 +568,11 @@ mod tests {
             i_interface: 0,
         };
 
+        // Safety: midi_interface is valid repr(C,packed) struct, 9 bytes matches b_length
         let desc_bytes =
             unsafe { core::slice::from_raw_parts(&midi_interface as *const _ as *const u8, 9) };
 
+        // Safety: desc_bytes is 9 bytes (sizeof InterfaceDescriptor), read_unaligned handles packed repr
         let interface =
             unsafe { core::ptr::read_unaligned(desc_bytes.as_ptr() as *const InterfaceDescriptor) };
 

@@ -29,6 +29,7 @@ impl Register<u32> {
     /// Read register with acquire semantics for status/data reads
     #[inline(always)]
     pub fn read(&self) -> u32 {
+        // Safety: UnsafeCell contains valid MMIO register address, read with proper barriers
         unsafe {
             cortex_m::asm::dmb(); // Data Memory Barrier before read
             let value = read_volatile(self.value.get());
@@ -40,12 +41,14 @@ impl Register<u32> {
     /// Read register without barriers for capability registers (read-only, no side effects)
     #[inline(always)]
     pub fn read_relaxed(&self) -> u32 {
+        // Safety: UnsafeCell contains valid MMIO register, relaxed read for capability registers
         unsafe { read_volatile(self.value.get()) }
     }
 
     /// Write register with release semantics for control writes
     #[inline(always)]
     pub fn write(&self, value: u32) {
+        // Safety: UnsafeCell contains valid MMIO register address, write with proper barriers
         unsafe {
             cortex_m::asm::dmb(); // Data Memory Barrier before write
             write_volatile(self.value.get(), value);
@@ -65,6 +68,7 @@ impl Register<u32> {
     where
         F: FnOnce(u32) -> u32,
     {
+        // Safety: UnsafeCell contains valid MMIO register, RMW with full barrier sequence
         unsafe {
             cortex_m::asm::dmb();
             let current = read_volatile(self.value.get());
@@ -134,6 +138,7 @@ pub unsafe fn read_register_at(addr: *const u32) -> u32 {
         "Invalid MMIO address: {:#x}",
         addr as usize
     );
+    // Safety: Caller ensures addr is valid MMIO register, validated in debug builds
     unsafe {
         cortex_m::asm::dmb();
         let value = core::ptr::read_volatile(addr);
@@ -159,6 +164,7 @@ pub unsafe fn write_register_at(addr: *mut u32, value: u32) {
         "Invalid MMIO address: {:#x}",
         addr as usize
     );
+    // Safety: Caller ensures addr is valid MMIO register, validated in debug builds
     unsafe {
         cortex_m::asm::dmb();
         core::ptr::write_volatile(addr, value);
@@ -192,6 +198,7 @@ where
         "Invalid MMIO address: {:#x}",
         addr as usize
     );
+    // Safety: Caller ensures addr is valid MMIO register, RMW with full barrier sequence
     unsafe {
         cortex_m::asm::dmb();
         let current = core::ptr::read_volatile(addr);
@@ -215,6 +222,7 @@ where
 /// In debug builds, panics if address is not in a known MMIO region
 #[inline(always)]
 pub unsafe fn set_bits_at(addr: *mut u32, mask: u32) {
+    // Safety: modify_register_at validates address and uses proper barriers
     unsafe {
         modify_register_at(addr, |v| v | mask);
     }
@@ -232,6 +240,7 @@ pub unsafe fn set_bits_at(addr: *mut u32, mask: u32) {
 /// In debug builds, panics if address is not in a known MMIO region
 #[inline(always)]
 pub unsafe fn clear_bits_at(addr: *mut u32, mask: u32) {
+    // Safety: modify_register_at validates address and uses proper barriers
     unsafe {
         modify_register_at(addr, |v| v & !mask);
     }
@@ -301,11 +310,14 @@ impl RegisterTimeout {
         reg: *const u32,
         mask: u32,
     ) -> Result<(), crate::error::UsbError> {
-        self.wait_for(|| unsafe {
-            cortex_m::asm::dmb();
-            let val = core::ptr::read_volatile(reg);
-            cortex_m::asm::dmb();
-            (val & mask) == 0
+        self.wait_for(|| {
+            // Safety: Caller ensures reg is valid MMIO register, read with proper barriers
+            unsafe {
+                cortex_m::asm::dmb();
+                let val = core::ptr::read_volatile(reg);
+                cortex_m::asm::dmb();
+                (val & mask) == 0
+            }
         })
     }
 
@@ -331,11 +343,14 @@ impl RegisterTimeout {
         reg: *const u32,
         mask: u32,
     ) -> Result<(), crate::error::UsbError> {
-        self.wait_for(|| unsafe {
-            cortex_m::asm::dmb();
-            let val = core::ptr::read_volatile(reg);
-            cortex_m::asm::dmb();
-            (val & mask) != 0
+        self.wait_for(|| {
+            // Safety: Caller ensures reg is valid MMIO register, read with proper barriers
+            unsafe {
+                cortex_m::asm::dmb();
+                let val = core::ptr::read_volatile(reg);
+                cortex_m::asm::dmb();
+                (val & mask) != 0
+            }
         })
     }
 }

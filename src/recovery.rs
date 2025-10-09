@@ -213,6 +213,8 @@ impl RecoveryCoordinator {
     fn reset_port(&mut self, controller: Option<&mut EhciController<8>>) -> Result<()> {
         let controller = controller.ok_or(UsbError::InvalidParameter)?;
 
+        // Safety: controller provides valid base address, CAPLENGTH/PORTSC registers accessed
+        // with proper memory barriers, addresses validated by controller initialization
         unsafe {
             // Get correct controller base address (NOT hardcoded USB1!)
             let base_addr = controller.base_address();
@@ -266,6 +268,8 @@ impl RecoveryCoordinator {
         defmt::warn!("Resetting USB controller");
 
         // Stop controller
+        // Safety: controller provides valid base address, CAPLENGTH/USBCMD/USBSTS registers
+        // accessed with proper memory barriers, addresses validated by controller initialization
         unsafe {
             // Get correct controller base address (NOT hardcoded USB1!)
             let base_addr = controller.base_address();

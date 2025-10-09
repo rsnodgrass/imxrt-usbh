@@ -51,6 +51,8 @@ impl StackMonitor {
         let canary_start = stack_end as *mut u32;
         let canary_pattern = 0xDEADBEEF;
 
+        // Safety: canary_start points to guard region at stack bottom, which is always unused,
+        // num_words is bounded by guard_size/4, pointer arithmetic stays within guard region
         unsafe {
             // Fill guard region with canary pattern
             let num_words = (self.guard_size / 4) as usize;
@@ -107,6 +109,8 @@ impl StackMonitor {
         let canary_end = (stack_end + self.guard_size) as *const u32;
         let canary_pattern = 0xDEADBEEF;
 
+        // Safety: canary_start and canary_end bound the guard region at stack bottom,
+        // pointer iteration stays within guard region bounds (canary_end limit enforced)
         unsafe {
             let mut ptr = canary_start;
             while ptr < canary_end {
@@ -297,6 +301,8 @@ pub static STACK_MONITOR: Mutex<RefCell<Option<StackMonitor>>> = Mutex::new(RefC
 /// Must be called once at system startup with correct stack boundaries
 pub unsafe fn init_safety_monitoring(stack_base: u32, stack_size: u32) {
     // Create and initialize stack monitor
+    // Safety: Caller ensures stack_base and stack_size are correct per function contract,
+    // init_canary writes only to guard region which is always unused
     let monitor = unsafe {
         let m = StackMonitor::new(stack_base, stack_size);
         m.init_canary();

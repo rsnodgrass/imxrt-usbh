@@ -451,6 +451,7 @@ impl Hub {
 
         let mut buffer = memory_pool.alloc_buffer(4)?;
 
+        // Safety: setup_bytes is valid for duration of call, buffer from pool remains valid
         unsafe {
             executor.execute_control_transfer(
                 self.address,
@@ -495,6 +496,7 @@ impl Hub {
 
         let mut buffer = memory_pool.alloc_buffer(4)?;
 
+        // Safety: setup_bytes is valid for duration of call, buffer from pool remains valid
         unsafe {
             executor.execute_control_transfer(
                 self.address,
@@ -545,6 +547,7 @@ impl Hub {
             0x00, // wLength: 0
         ];
 
+        // Safety: setup_bytes is valid for duration of call, no data buffer (None)
         unsafe {
             executor.execute_control_transfer(
                 self.address,
@@ -582,6 +585,7 @@ impl Hub {
             0x00, // wLength: 0
         ];
 
+        // Safety: setup_bytes is valid for duration of call, no data buffer (None)
         unsafe {
             executor.execute_control_transfer(
                 self.address,
@@ -938,6 +942,8 @@ impl SplitTransactionHandler {
                 if success || split.cs_retries >= split.timing.additional_cs {
                     // Transaction complete or max retries exceeded
                     // Release TT bandwidth
+                    // Safety: split.tt pointer came from &TransactionTranslator passed to register_split,
+                    // TT must remain valid for duration of active split (caller's responsibility)
                     unsafe {
                         (*split.tt).release_split();
                     }
