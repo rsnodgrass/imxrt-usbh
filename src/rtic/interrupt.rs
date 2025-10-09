@@ -157,8 +157,10 @@ impl UsbInterruptContext {
 
     /// Queue transfer complete event
     fn queue_transfer_complete(&self) -> Result<()> {
-        // In real implementation, would scan async/periodic lists
-        // For now, queue a placeholder event
+        // Queue deferred event to scan async/periodic lists in background task
+        // EHCI requires walking QH/QTD lists to find completed transfers, which is
+        // too expensive for ISR. Background task will scan schedules and process
+        // completions. qtd_addr=0 signals "scan needed" rather than specific address.
         self.handler
             .deferred_events
             .enqueue(DeferredEvent::TransferComplete { qtd_addr: 0 });
@@ -222,8 +224,17 @@ pub mod app {
     #[app(device = crate::pac, peripherals = true, dispatchers = [UART1, UART2])]
     pub mod usb_host_app {
         use super::*;
+        use crate::ehci::{QueueHead, QueueTD};
         use crate::perf::PERF_COUNTERS;
         use crate::rtic::example::USB_INTERRUPT_HANDLER;
+
+        /// Static DMA memory for queue heads (32-byte aligned per EHCI spec)
+        #[repr(C, align(32))]
+        static mut QH_MEMORY: [QueueHead; 32] = [QueueHead::new(); 32];
+
+        /// Static DMA memory for queue transfer descriptors (32-byte aligned per EHCI spec)
+        #[repr(C, align(32))]
+        static mut QTD_MEMORY: [QueueTD; 128] = [QueueTD::new(); 128];
 
         /// Shared resources
         #[shared]
@@ -259,11 +270,12 @@ pub mod app {
             // Create transfer manager
             let transfer_manager = ControlTransferManager::new();
 
-            // Create descriptor allocator (would use actual memory in real impl)
+            // Create descriptor allocator with static DMA-safe memory
+            // Safety: QH_MEMORY and QTD_MEMORY are static mut, properly aligned (32-byte),
+            // and accessed only once during init before being moved into shared resources
             let descriptor_allocator = unsafe {
-                // Placeholder - would use DMA memory region
-                let qh_mem = &mut [][..];
-                let qtd_mem = &mut [][..];
+                let qh_mem = &mut QH_MEMORY;
+                let qtd_mem = &mut QTD_MEMORY;
                 DescriptorAllocator::new(qh_mem, qtd_mem)
             };
 

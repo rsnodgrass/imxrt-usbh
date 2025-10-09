@@ -194,8 +194,36 @@ where
     [(); N_PORTS]: Sized,
 {
     /// Process USB transfers (only available when running)
+    ///
+    /// Checks for completed transfers and other USB events by reading the
+    /// USBSTS register and clearing processed interrupt bits.
+    ///
+    /// Transfer-specific processing should be done by transfer managers
+    /// (BulkTransferManager, InterruptTransferManager, etc.)
     pub fn process_transfers(&mut self) -> Result<()> {
-        // Transfer processing logic will be implemented later
+        let op_base = self.operational_base();
+        let usbsts_ptr = (op_base + 0x04) as *mut u32;
+
+        // Read current status
+        cortex_m::asm::dmb();
+        // Safety: Reading USBSTS register at offset 0x04 from operational base with barriers
+        let status = unsafe { core::ptr::read_volatile(usbsts_ptr) };
+        cortex_m::asm::dmb();
+
+        // Check for completed transfers or errors that need processing
+        if status & (UsbSts::USB_INTERRUPT.bits() | UsbSts::USB_ERROR_INTERRUPT.bits()) != 0 {
+            // Clear interrupt bits by writing them back (write-1-to-clear)
+            cortex_m::asm::dmb();
+            // Safety: Writing to USBSTS register to clear interrupt bits with barriers
+            unsafe {
+                core::ptr::write_volatile(
+                    usbsts_ptr,
+                    status & (UsbSts::USB_INTERRUPT.bits() | UsbSts::USB_ERROR_INTERRUPT.bits()),
+                );
+            }
+            cortex_m::asm::dsb();
+        }
+
         Ok(())
     }
 

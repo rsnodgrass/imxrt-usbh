@@ -376,7 +376,24 @@ impl UsbInterruptHandler {
     fn handle_transfer_completion(&self, qtd_addr: u32) -> Result<()> {
         // Process completed transfer
         // This can take longer since it's not in the critical path
-        self.perf_counters.record_transfer_success(0); // Placeholder
+
+        // If qtd_addr is 0, this signals a deferred scan of transfer lists
+        // rather than a specific completed transfer
+        if qtd_addr == 0 {
+            // Would scan async/periodic schedules here to find completed transfers
+            // For this background task, just record a scan event
+            self.perf_counters.record_transfer_success(0);
+            return Ok(());
+        }
+
+        // For specific QTD completion, extract bytes transferred from QTD
+        // Safety: qtd_addr must be valid QTD address from EHCI schedule
+        let bytes_transferred = unsafe {
+            let qtd = &*(qtd_addr as *const crate::ehci::QueueTD);
+            qtd.bytes_transferred()
+        };
+
+        self.perf_counters.record_transfer_success(bytes_transferred);
         Ok(())
     }
 

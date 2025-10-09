@@ -305,10 +305,12 @@ where
         }
     }
 
-    /// Get system time in microseconds (placeholder implementation)
+    /// Get system time in microseconds
+    ///
+    /// Uses DWT cycle counter for high-precision timing on i.MX RT1062 (600 MHz)
     fn get_system_time_us() -> u32 {
-        // In real implementation, this would use a system timer
-        // For now, use DWT cycle counter
+        // DWT cycle counter / CPU frequency (600 MHz) = microseconds
+        // This provides accurate timing without additional timer overhead
         cortex_m::peripheral::DWT::cycle_count() / 600
     }
 

@@ -427,13 +427,11 @@ impl ControlTransfer {
 
     /// Get bytes transferred from qTD status
     fn get_bytes_from_qtd(&self, status: u32) -> u32 {
-        // Extract bytes from qTD token field
-        // Bits 30:16 contain total bytes to transfer
-        // Actual bytes transferred = original - remaining
-        let _remaining = (status >> 16) & 0x7FFF;
-        // This would need the original size from the qTD
-        // For now, return a placeholder
-        0
+        // Extract remaining bytes from qTD token field
+        // Bits 30:16 contain remaining bytes (decrements as transfer progresses)
+        let remaining = (status >> 16) & 0x7FFF;
+        // Calculate bytes transferred = original total - remaining
+        self.total_bytes.saturating_sub(remaining)
     }
 
     /// Check if transfer is complete
