@@ -83,9 +83,11 @@ impl UsbInterruptContext {
     fn read_and_clear_status(&self) -> u32 {
         unsafe {
             let usbsts_addr = (self.usb_base + 0x144) as *mut u32; // USBSTS offset
+            cortex_m::asm::dmb(); // ensure prior ops complete before status read
             let status = core::ptr::read_volatile(usbsts_addr);
+            cortex_m::asm::dmb(); // ensure read completes before using value
 
-            // Clear the interrupt bits by writing them back
+            // Clear the interrupt bits by writing them back (W1C register)
             core::ptr::write_volatile(usbsts_addr, status);
 
             // Memory barrier to ensure completion
@@ -196,7 +198,9 @@ impl UsbInterruptContext {
     fn port_has_change(&self, port: u8) -> bool {
         unsafe {
             let portsc_addr = (self.usb_base + 0x184 + (port as usize * 4)) as *const u32;
+            cortex_m::asm::dmb(); // ensure prior ops complete before PORTSC read
             let portsc = core::ptr::read_volatile(portsc_addr);
+            cortex_m::asm::dmb(); // ensure read completes before using value
 
             // Check for any change bits (Connect, Enable, Over-current)
             (portsc & 0x0E) != 0
@@ -381,9 +385,11 @@ impl UsbInterruptHandler {
     pub fn handle_port_change_event(&self, port: u8) -> Result<()> {
         unsafe {
             let portsc_addr = (0x402E_0184 + (port as usize * 4)) as *mut u32;
+            cortex_m::asm::dmb(); // ensure prior ops complete before PORTSC read
             let portsc = core::ptr::read_volatile(portsc_addr);
+            cortex_m::asm::dmb(); // ensure read completes before using value
 
-            // Clear change bits by writing 1s
+            // Clear change bits by writing 1s (W1C bits)
             let clear_bits = portsc & 0x0E;
             core::ptr::write_volatile(portsc_addr, clear_bits);
 

@@ -194,17 +194,17 @@ impl BulkTransfer {
         // Calculate transfer size for this qTD
         let transferred = self.bytes_transferred.load(Ordering::Acquire);
         let remaining = self.total_bytes - transferred;
-        let transfer_size = remaining.min(self.max_packet_size as u32);
+        let _transfer_size = remaining.min(self.max_packet_size as u32);
 
         if let Some(ref buffer) = self.data_buffer {
             // Configure qTD for bulk transfer
             let _buffer_addr = buffer.dma_addr() + transferred;
-            let toggle = self.data_toggle.load(Ordering::Acquire);
+            let _toggle = self.data_toggle.load(Ordering::Acquire);
 
             // This would configure the actual hardware qTD:
-            // - Buffer pointer = buffer_addr
-            // - Transfer size = transfer_size
-            // - Data toggle = toggle
+            // - Buffer pointer = _buffer_addr
+            // - Transfer size = _transfer_size
+            // - Data toggle = _toggle
             // - Endpoint = self.endpoint | (direction << 7)
             // - Device address = self.device_address
             // - PID = IN/OUT token
@@ -218,8 +218,8 @@ impl BulkTransfer {
                 self.device_address,
                 self.endpoint,
                 self.direction,
-                transfer_size,
-                toggle
+                _transfer_size,
+                _toggle
             );
         }
 

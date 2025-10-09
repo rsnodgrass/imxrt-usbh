@@ -39,6 +39,11 @@ use imxrt_usbh::ehci::{EhciController, Uninitialized};
 use imxrt_usbh::phy::UsbPhy;
 use log::info;
 
+#[no_mangle]
+fn _defmt_timestamp() -> u64 {
+    0
+}
+
 #[bsp::rt::entry]
 fn main() -> ! {
     let board::Resources {

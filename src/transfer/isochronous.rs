@@ -83,6 +83,9 @@ pub struct IsochronousTransfer {
     /// Transfer direction
     direction: Direction,
     /// Device address
+    /// NOTE: Currently unused. Originally intended for defmt logging.
+    /// Safe to remove if no future logging/debugging use case.
+    #[allow(dead_code)]
     device_address: u8,
     /// Endpoint number (without direction bit)
     endpoint: u8,

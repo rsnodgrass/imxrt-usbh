@@ -21,7 +21,13 @@
       "Bash(cargo metadata:*)",
       "Bash(rust-objcopy:*)",
       "Bash(git mv:*)",
-      "Bash(cargo objcopy:*)"
+      "Bash(cargo objcopy:*)",
+      "mcp__context7__resolve-library-id",
+      "Bash(rg:*)",
+      "Bash(sort:*)",
+      "Bash(cargo clippy:*)",
+      "Read(///**)",
+      "Bash(tokei:*)"
     ],
     "deny": [],
     "ask": []

@@ -418,8 +418,8 @@ impl EnumerationApp {
         // Initialize USB memory pool
         let memory_pool = UsbMemoryPool::new();
 
-        // Initialize USB PHY
-        let phy_base = 0x400D_9000;
+        // Initialize USB PHY (USB2 for host mode on Teensy pins 30/31)
+        let phy_base = 0x400D_A000; // USBPHY2 base address
         let ccm_base = 0x400F_C000;
         let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 
@@ -656,15 +656,16 @@ fn configure_usb_clocks() {
         );
 
         // Configure USB PHY PLL
+        // CRITICAL: Use USB2 PLL for host mode (USB1 is device/programming port)
         let analog = ral::ccm_analog::CCM_ANALOG::instance();
 
-        modify_reg!(ral::ccm_analog, analog, PLL_USB1,
+        modify_reg!(ral::ccm_analog, analog, PLL_USB2,
             POWER: 1,
             ENABLE: 1,
             EN_USB_CLKS: 1
         );
 
-        while read_reg!(ral::ccm_analog, analog, PLL_USB1, LOCK) == 0 {}
+        while read_reg!(ral::ccm_analog, analog, PLL_USB2, LOCK) == 0 {}
     }
 }
 

@@ -326,7 +326,7 @@ impl SplitTiming {
     }
 
     /// Get timing for interrupt transfers
-    pub fn interrupt(interval: u8) -> Self {
+    pub fn interrupt(_interval: u8) -> Self {
         // For simplicity, use same pattern as control/bulk
         // In production, this would calculate based on interval
         Self {
@@ -487,8 +487,8 @@ impl Hub {
             0x00, // bRequest: GET_STATUS
             0x00,
             0x00, // wValue
-            (port & 0xFF) as u8,
-            (port >> 8) as u8, // wIndex
+            port,  // wIndex low byte (port numbers are always < 255)
+            0x00,  // wIndex high byte (always 0 for USB hub ports)
             0x04,
             0x00, // wLength: 4
         ];
@@ -527,7 +527,7 @@ impl Hub {
         port: u8,
         feature: PortFeature,
         executor: &mut TransferExecutor,
-        memory_pool: &mut UsbMemoryPool,
+        _memory_pool: &mut UsbMemoryPool,
     ) -> Result<()> {
         if port == 0 || port > self.num_ports {
             return Err(UsbError::InvalidParameter);
@@ -539,8 +539,8 @@ impl Hub {
             0x03, // bRequest: SET_FEATURE
             (feature_val & 0xFF) as u8,
             (feature_val >> 8) as u8, // wValue
-            (port & 0xFF) as u8,
-            (port >> 8) as u8, // wIndex
+            port,  // wIndex low byte (port numbers are always < 255)
+            0x00,  // wIndex high byte (always 0 for USB hub ports)
             0x00,
             0x00, // wLength: 0
         ];
@@ -564,7 +564,7 @@ impl Hub {
         port: u8,
         feature: PortFeature,
         executor: &mut TransferExecutor,
-        memory_pool: &mut UsbMemoryPool,
+        _memory_pool: &mut UsbMemoryPool,
     ) -> Result<()> {
         if port == 0 || port > self.num_ports {
             return Err(UsbError::InvalidParameter);
@@ -576,8 +576,8 @@ impl Hub {
             0x01, // bRequest: CLEAR_FEATURE
             (feature_val & 0xFF) as u8,
             (feature_val >> 8) as u8, // wValue
-            (port & 0xFF) as u8,
-            (port >> 8) as u8, // wIndex
+            port,  // wIndex low byte (port numbers are always < 255)
+            0x00,  // wIndex high byte (always 0 for USB hub ports)
             0x00,
             0x00, // wLength: 0
         ];
@@ -929,7 +929,11 @@ impl SplitTransactionHandler {
 
     /// Handle split transaction completion
     pub fn handle_completion(&mut self, qh_index: usize, success: bool) {
-        self.active_splits.retain(|split| {
+        // Take ownership of active_splits temporarily
+        let old_splits = core::mem::replace(&mut self.active_splits, heapless::Vec::new());
+
+        // Rebuild the Vec, updating cs_retries for retried transactions
+        for mut split in old_splits.into_iter() {
             if split.qh_index == qh_index {
                 if success || split.cs_retries >= split.timing.additional_cs {
                     // Transaction complete or max retries exceeded
@@ -937,16 +941,16 @@ impl SplitTransactionHandler {
                     unsafe {
                         (*split.tt).release_split();
                     }
-                    false // Remove from active list
+                    // Don't add back to active_splits (filtered out)
                 } else {
                     // Retry complete-split
                     split.cs_retries += 1;
-                    true // Keep in active list
+                    let _ = self.active_splits.push(split); // Keep in active list
                 }
             } else {
-                true // Not this transaction
+                let _ = self.active_splits.push(split); // Keep unrelated transactions
             }
-        });
+        }
     }
 }
 

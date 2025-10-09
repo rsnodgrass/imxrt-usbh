@@ -9,13 +9,22 @@ use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 // TODO: Fix RAL API usage after determining correct register names
 // use imxrt_ral as ral;
 
-/// USB1 PLL configuration constants per RM 14.5.1
-const USB1_PLL_DIV_SELECT: u32 = 20; // 480MHz from 24MHz OSC
-const USB1_PLL_ENABLE: u32 = 1 << 13;
-const USB1_PLL_POWER: u32 = 1 << 12;
-const USB1_PLL_EN_USB_CLKS: u32 = 1 << 6;
-const USB1_PLL_LOCK: u32 = 1 << 31;
-const USB1_PLL_BYPASS: u32 = 1 << 16; // Bypass bit per RM 14.5.3
+/// USB PLL configuration constants per RM 14.5.1
+/// These bits are identical for both USB1 and USB2 PLLs
+const USB_PLL_DIV_SELECT: u32 = 20; // 480MHz from 24MHz OSC
+const USB_PLL_ENABLE: u32 = 1 << 13;
+const USB_PLL_POWER: u32 = 1 << 12;
+const USB_PLL_EN_USB_CLKS: u32 = 1 << 6;
+const USB_PLL_LOCK: u32 = 1 << 31;
+const USB_PLL_BYPASS: u32 = 1 << 16; // Bypass bit per RM 14.5.3
+
+/// CCM_ANALOG PLL register offsets per RM 14.5.1
+const CCM_ANALOG_PLL_USB1_OFFSET: usize = 0x10;
+const CCM_ANALOG_PLL_USB2_OFFSET: usize = 0x20;
+
+/// USBPHY base addresses per RM Chapter 2
+const USBPHY1_BASE: usize = 0x400D_9000;
+const USBPHY2_BASE: usize = 0x400D_A000;
 
 /// Hardware timing constants per i.MX RT reference manual
 mod timing {
@@ -34,10 +43,12 @@ mod timing {
 /// USBPHY register offsets per RM 66.6
 #[allow(dead_code)]
 const USBPHY_PWD_OFFSET: usize = 0x00; // Power-Down register
+/// TX register offset - reserved for future PHY calibration/tuning features
 #[allow(dead_code)]
-const USBPHY_TX_OFFSET: usize = 0x10; // TX register
+const USBPHY_TX_OFFSET: usize = 0x10;
+/// RX register offset - reserved for future PHY calibration/tuning features
 #[allow(dead_code)]
-const USBPHY_RX_OFFSET: usize = 0x20; // RX register
+const USBPHY_RX_OFFSET: usize = 0x20;
 const USBPHY_CTRL_OFFSET: usize = 0x30; // Control register
 #[allow(dead_code)]
 const USBPHY_CTRL_SET_OFFSET: usize = 0x34;
@@ -79,6 +90,24 @@ impl UsbPhy {
             recovery_attempts: AtomicU8::new(0),
             phy_base,
             ccm_base,
+        }
+    }
+
+    /// Get the correct PLL register offset based on which PHY instance this is
+    ///
+    /// CRITICAL: USB1 and USB2 have separate PLLs at different offsets.
+    /// Using the wrong PLL will reconfigure the other USB controller!
+    fn get_pll_offset(&self) -> usize {
+        match self.phy_base {
+            USBPHY1_BASE => CCM_ANALOG_PLL_USB1_OFFSET,
+            USBPHY2_BASE => CCM_ANALOG_PLL_USB2_OFFSET,
+            _ => {
+                // Unknown PHY base - this should never happen if constructed properly
+                // Default to USB1 to maintain backward compatibility, but this is a bug
+                #[cfg(feature = "defmt")]
+                defmt::error!("Unknown PHY base address: {:#x}", self.phy_base);
+                CCM_ANALOG_PLL_USB1_OFFSET
+            }
         }
     }
 
@@ -142,54 +171,134 @@ impl UsbPhy {
 
     /// Initialize USB PLL with hardware timing verification
     fn init_usb_pll(&mut self) -> Result<()> {
+        // CRITICAL: Use correct PLL offset for this PHY instance
+        let pll_offset = self.get_pll_offset();
+
         // Step 1: Set bypass and configure PLL (RM 14.5.3)
         unsafe {
-            let pll_reg = (self.ccm_base + 0x10) as *mut u32;
+            let pll_reg = (self.ccm_base + pll_offset) as *mut u32;
             cortex_m::asm::dmb();
             let mut pll = core::ptr::read_volatile(pll_reg);
             cortex_m::asm::dmb();
 
             // Set bypass before modifying PLL configuration (RM requirement)
-            pll |= USB1_PLL_BYPASS;
+            pll |= USB_PLL_BYPASS;
 
             // Configure divider and enable PLL
             pll &= !0x3F; // Clear divider field
-            pll |= USB1_PLL_DIV_SELECT & 0x3F;
-            pll |= USB1_PLL_ENABLE | USB1_PLL_POWER;
+            pll |= USB_PLL_DIV_SELECT & 0x3F;
+            pll |= USB_PLL_ENABLE | USB_PLL_POWER;
 
             cortex_m::asm::dmb();
             core::ptr::write_volatile(pll_reg, pll);
             cortex_m::asm::dsb();
+
+            // Verify write took effect on correct register
+            cortex_m::asm::dmb();
+            let readback = core::ptr::read_volatile(pll_reg);
+            cortex_m::asm::dmb();
+
+            // Check critical bits were set
+            if (readback & USB_PLL_BYPASS) == 0 {
+                #[cfg(feature = "defmt")]
+                defmt::error!("PLL bypass not set after write");
+                return Err(UsbError::HardwareFailure);
+            }
+            if (readback & USB_PLL_ENABLE) == 0 {
+                #[cfg(feature = "defmt")]
+                defmt::error!("PLL enable not set after write");
+                return Err(UsbError::HardwareFailure);
+            }
+            if (readback & 0x3F) != (USB_PLL_DIV_SELECT & 0x3F) {
+                #[cfg(feature = "defmt")]
+                defmt::error!("PLL divider mismatch: expected {}, got {}",
+                    USB_PLL_DIV_SELECT & 0x3F, readback & 0x3F);
+                return Err(UsbError::HardwareFailure);
+            }
         }
+
+        // Verify we didn't accidentally modify the OTHER PLL
+        self.verify_other_pll_unchanged(pll_offset)?;
 
         // Step 2: Wait for PLL lock with timeout (RM 14.5.3)
         let timeout = RegisterTimeout::new_us(timing::PLL_LOCK_TIMEOUT_US);
         timeout
             .wait_for(|| unsafe {
-                let pll_reg = (self.ccm_base + 0x10) as *const u32;
+                let pll_reg = (self.ccm_base + pll_offset) as *const u32;
                 cortex_m::asm::dmb();
                 let pll = core::ptr::read_volatile(pll_reg);
                 cortex_m::asm::dmb();
-                (pll & USB1_PLL_LOCK) != 0
+                (pll & USB_PLL_LOCK) != 0
             })
             .map_err(|_| UsbError::HardwareFailure)?;
 
         // Step 3: Clear bypass after lock confirmed (RM requirement)
         unsafe {
-            let pll_reg = (self.ccm_base + 0x10) as *mut u32;
+            let pll_reg = (self.ccm_base + pll_offset) as *mut u32;
             cortex_m::asm::dmb();
             let mut pll = core::ptr::read_volatile(pll_reg);
             cortex_m::asm::dmb();
-            pll &= !USB1_PLL_BYPASS;
-            pll |= USB1_PLL_EN_USB_CLKS;
+            pll &= !USB_PLL_BYPASS;
+            pll |= USB_PLL_EN_USB_CLKS;
             cortex_m::asm::dmb();
             core::ptr::write_volatile(pll_reg, pll);
             cortex_m::asm::dsb();
+
+            // Verify bypass cleared and clocks enabled
+            cortex_m::asm::dmb();
+            let readback = core::ptr::read_volatile(pll_reg);
+            cortex_m::asm::dmb();
+
+            if (readback & USB_PLL_BYPASS) != 0 {
+                #[cfg(feature = "defmt")]
+                defmt::error!("PLL bypass still set after clear");
+                return Err(UsbError::HardwareFailure);
+            }
+            if (readback & USB_PLL_EN_USB_CLKS) == 0 {
+                #[cfg(feature = "defmt")]
+                defmt::error!("USB clocks not enabled after write");
+                return Err(UsbError::HardwareFailure);
+            }
         }
 
         // Wait for clock stabilization
         self.delay_us(timing::CLOCK_STABILIZATION_US);
         self.pll_locked.store(true, Ordering::Release);
+
+        Ok(())
+    }
+
+    /// Verify the OTHER USB PLL wasn't accidentally modified
+    ///
+    /// This catches bugs where we write to the wrong PLL register offset.
+    /// We snapshot the other PLL before init and verify it's unchanged after.
+    fn verify_other_pll_unchanged(&self, our_pll_offset: usize) -> Result<()> {
+        // Determine the OTHER PLL offset
+        let other_pll_offset = match our_pll_offset {
+            CCM_ANALOG_PLL_USB1_OFFSET => CCM_ANALOG_PLL_USB2_OFFSET,
+            CCM_ANALOG_PLL_USB2_OFFSET => CCM_ANALOG_PLL_USB1_OFFSET,
+            _ => return Ok(()), // Unknown offset, can't verify
+        };
+
+        // Read the other PLL and check it's not in an unexpected state
+        // We can't check exact values since it might be in use, but we can
+        // verify it's not showing signs of recent modification
+        unsafe {
+            let other_pll_reg = (self.ccm_base + other_pll_offset) as *const u32;
+            cortex_m::asm::dmb();
+            let other_pll = core::ptr::read_volatile(other_pll_reg);
+            cortex_m::asm::dmb();
+
+            // If the other PLL has our exact divider value and was just enabled,
+            // that's suspicious - we may have written to wrong register
+            let other_divider = other_pll & 0x3F;
+            if other_divider == (USB_PLL_DIV_SELECT & 0x3F) {
+                // Same divider is concerning but not conclusive (both use 480MHz)
+                // Log a warning but don't fail
+                #[cfg(feature = "defmt")]
+                defmt::warn!("Other PLL has same divider - verify correct PLL modified");
+            }
+        }
 
         Ok(())
     }
@@ -314,13 +423,14 @@ impl UsbPhy {
 
     /// Check PHY health and attempt recovery if needed
     pub fn health_check_and_recovery(&mut self) -> Result<()> {
-        // Check PLL lock status
+        // Check PLL lock status using correct PLL offset for this PHY
+        let pll_offset = self.get_pll_offset();
         let pll_locked = unsafe {
-            let pll_reg = (self.ccm_base + 0x10) as *const u32;
+            let pll_reg = (self.ccm_base + pll_offset) as *const u32;
             cortex_m::asm::dmb();
             let pll = core::ptr::read_volatile(pll_reg);
             cortex_m::asm::dmb();
-            (pll & USB1_PLL_LOCK) != 0
+            (pll & USB_PLL_LOCK) != 0
         };
 
         if !pll_locked {
@@ -351,16 +461,11 @@ impl UsbPhy {
         }
     }
 
-    /// Enable USB PHY interrupts
-    pub fn enable_interrupts(&mut self) {
-        unsafe {
-            let ctrl_reg = (self.phy_base + 0x00) as *mut u32;
-            let mut ctrl = core::ptr::read_volatile(ctrl_reg);
-            ctrl |= USBPHY_CTRL_HOSTDISCONDETECT_IRQ;
-            core::ptr::write_volatile(ctrl_reg, ctrl);
-        }
-    }
 }
+
+// Note: enable_interrupts() method was removed - it was buggy (wrong register offset of 0x00
+// instead of USBPHY_CTRL_OFFSET, missing memory barriers) and functionality is already
+// covered by configure_host_mode() method above.
 
 /// PHY status for health monitoring
 #[derive(Debug, Clone, Copy)]

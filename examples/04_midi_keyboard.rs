@@ -53,12 +53,13 @@ use core::sync::atomic::{AtomicU32, Ordering};
 /// These addresses are from the i.MX RT1062 reference manual and are
 /// specific to the Teensy 4.x hardware platform.
 pub mod hardware_addresses {
-    /// USB PHY1 register base address (Reference Manual Section 15.6)
+    /// USB PHY2 register base address (Reference Manual Section 15.6)
     /// Controls the physical layer of the USB interface including:
     /// - PLL configuration for USB clock generation
     /// - Transceiver settings for signal levels
     /// - Power management for the USB PHY
-    pub const USBPHY1_BASE_ADDRESS: u32 = 0x400D_9000;
+    /// USB2 is used for host mode on Teensy (pins 30/31), USB1 is device/programming
+    pub const USBPHY2_BASE_ADDRESS: u32 = 0x400D_A000;
 
     /// Clock Control Module (CCM) register base address (Reference Manual Section 14)
     /// Controls all system clocks including:
@@ -706,7 +707,7 @@ impl MidiApp {
         let memory_pool = UsbMemoryPool::new();
 
         // Initialize USB PHY with documented register addresses
-        let phy_base = USBPHY1_BASE_ADDRESS as usize; // USB PHY1 register base
+        let phy_base = USBPHY2_BASE_ADDRESS as usize; // USB PHY2 register base
         let ccm_base = CCM_BASE_ADDRESS as usize; // Clock Control Module base
         let _usb_phy = unsafe { UsbPhy::new(phy_base, ccm_base) };
 
@@ -1124,9 +1125,10 @@ fn configure_usb_clocks() {
         // Step 2: Configure USB PHY PLL for 480MHz generation
         let analog = ral::ccm_analog::CCM_ANALOG::instance();
 
-        // Power up and configure the USB1 PLL
+        // Power up and configure the USB2 PLL
         // This PLL generates the precise 480MHz clock required for USB 2.0 High-Speed
-        modify_reg!(ral::ccm_analog, analog, PLL_USB1,
+        // CRITICAL: USB2 PLL for host mode (USB1 PLL is for device/programming port)
+        modify_reg!(ral::ccm_analog, analog, PLL_USB2,
             POWER: PLL_POWER_UP,         // Power up the PLL circuitry
             ENABLE: PLL_OUTPUT_ENABLE,   // Enable PLL clock output
             EN_USB_CLKS: USB_CLOCKS_ENABLE  // Route PLL output to USB clocks
@@ -1135,7 +1137,7 @@ fn configure_usb_clocks() {
         // Step 3: Wait for PLL frequency lock (critical for stability)
         // PLL needs time to stabilize after configuration changes
         let mut pll_lock_timeout = 1000; // Prevent infinite loop in case of hardware issues
-        while read_reg!(ral::ccm_analog, analog, PLL_USB1, LOCK) != PLL_LOCKED {
+        while read_reg!(ral::ccm_analog, analog, PLL_USB2, LOCK) != PLL_LOCKED {
             pll_lock_timeout -= 1;
             if pll_lock_timeout == 0 {
                 // In production, this would be a critical error
