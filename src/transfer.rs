@@ -128,28 +128,3 @@ pub enum ControlState {
     Failed(UsbError),
 }
 
-/// Base transfer manager (deprecated - use specific transfer managers instead)
-///
-/// This type exists for backward compatibility. Use the specific transfer managers:
-/// - [`BulkTransferManager`] for bulk transfers
-/// - [`InterruptTransferManager`] for interrupt transfers
-/// - [`IsochronousTransferManager`] for isochronous transfers
-/// - [`ControlTransferManager`](control::ControlTransferManager) for control transfers
-#[deprecated(
-    since = "0.1.0",
-    note = "Use specific transfer managers: BulkTransferManager, InterruptTransferManager, etc."
-)]
-pub struct TransferManager {
-    _private: (),
-}
-
-impl TransferManager {
-    /// Create new transfer manager (deprecated)
-    #[deprecated(
-        since = "0.1.0",
-        note = "Use specific transfer managers: BulkTransferManager, InterruptTransferManager, etc."
-    )]
-    pub const fn new() -> Self {
-        Self { _private: () }
-    }
-}
