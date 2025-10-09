@@ -24,6 +24,11 @@ const USB_PLL_BYPASS: u32 = 1 << 16; // Bypass bit per RM 14.5.3
 const CCM_ANALOG_PLL_USB1_OFFSET: usize = 0x10;
 const CCM_ANALOG_PLL_USB2_OFFSET: usize = 0x20;
 
+/// CCM clock gating register per RM 13.7.7
+const CCM_CCGR6_OFFSET: usize = 0x80;
+/// USB clock gate control (CG0 bits 0-1): 0b11 = clock always enabled
+const CCM_CCGR6_CG0_USB: u32 = 0x3;
+
 /// USBPHY base addresses per RM Chapter 2
 const USBPHY1_BASE: usize = 0x400D_9000;
 const USBPHY2_BASE: usize = 0x400D_A000;
@@ -161,6 +166,24 @@ impl UsbPhy {
 
     /// Initialize USB PLL with hardware timing verification
     fn init_usb_pll(&mut self) -> Result<()> {
+        // CRITICAL: Enable USB peripheral clock before accessing PLL registers
+        // Per i.MX RT1060 RM Ch. 13.1.1: Accessing gated peripherals causes bus faults
+        let ccgr6_reg = (self.ccm_base + CCM_CCGR6_OFFSET) as *mut u32;
+
+        unsafe {
+            // Enable USB clock gate (CG0 = 0b11 for always-on)
+            set_bits_at(ccgr6_reg, CCM_CCGR6_CG0_USB);
+
+            // Verify clock gate enabled with readback
+            cortex_m::asm::dmb();
+            let ccgr6 = read_register_at(ccgr6_reg);
+            if (ccgr6 & CCM_CCGR6_CG0_USB) != CCM_CCGR6_CG0_USB {
+                #[cfg(feature = "defmt")]
+                defmt::error!("USB clock gate not enabled: CCGR6={:#x}", ccgr6);
+                return Err(UsbError::HardwareFailure);
+            }
+        }
+
         // CRITICAL: Use correct PLL offset for this PHY instance
         let pll_offset = self.get_pll_offset();
 

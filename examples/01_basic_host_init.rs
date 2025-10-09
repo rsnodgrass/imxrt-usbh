@@ -48,7 +48,7 @@ fn main() -> ! {
         pins,
         mut gpio2,
         usb,
-        mut dma,
+        
         ..
     } = board::t40(board::instances());
 

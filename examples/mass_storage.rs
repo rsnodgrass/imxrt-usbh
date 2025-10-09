@@ -21,7 +21,7 @@ use teensy4_panic as _;
 
 use imxrt_usbh::{
     dma::UsbMemoryPool,
-    ehci::{EhciController, Running, TransferExecutor, Uninitialized},
+    ehci::{EhciController, TransferExecutor, Uninitialized},
     enumeration::{DeviceClass, DeviceEnumerator},
     phy::UsbPhy,
     Result, UsbError,

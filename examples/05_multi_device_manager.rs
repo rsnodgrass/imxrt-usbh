@@ -633,7 +633,7 @@ fn main() -> ! {
         ..
     } = board::t40(board::instances());
 
-    let mut led = board::led(&mut gpio2, pins.p13);
+    let led = board::led(&mut gpio2, pins.p13);
 
     // Set up USB CDC logging
     let mut poller = imxrt_log::log::usbd(usb, imxrt_log::Interrupts::Enabled).unwrap();
