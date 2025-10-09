@@ -34,6 +34,12 @@ use imxrt_usbh::{
 
 use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
+/// defmt timestamp function (required by library's defmt usage)
+#[no_mangle]
+fn _defmt_timestamp() -> u64 {
+    0
+}
+
 /// Maximum number of tracked devices
 const MAX_DEVICES: usize = 8;
 
