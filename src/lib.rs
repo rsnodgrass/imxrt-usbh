@@ -27,9 +27,94 @@
 #[cfg(feature = "defmt")]
 use defmt as _;
 
-/// CPU frequency for i.MX RT1062 (Teensy 4.x) in MHz
-/// Default is 600MHz. Override with compile-time configuration if needed.
-pub const CPU_FREQ_MHZ: u32 = 600;
+/// Hardware timing constants and utilities for i.MX RT1062 USB operations
+///
+/// All timing values are derived from:
+/// - i.MX RT1060 Reference Manual
+/// - USB 2.0 Specification
+/// - ARM Cortex-M7 operating at 600MHz
+pub mod timing {
+    /// CPU frequency for i.MX RT1062 (Teensy 4.x) in MHz
+    /// Default is 600MHz. Override with compile-time configuration if needed.
+    pub const CPU_FREQ_MHZ: u32 = 600;
+
+    /// Convert microseconds to CPU cycles
+    #[inline(always)]
+    pub const fn us_to_cycles(us: u32) -> u32 {
+        us * CPU_FREQ_MHZ
+    }
+
+    /// Convert milliseconds to CPU cycles
+    #[inline(always)]
+    pub const fn ms_to_cycles(ms: u32) -> u32 {
+        ms * CPU_FREQ_MHZ * 1000
+    }
+
+    /// Convert CPU cycles to microseconds
+    #[inline(always)]
+    pub const fn cycles_to_us(cycles: u32) -> u32 {
+        cycles / CPU_FREQ_MHZ
+    }
+
+    /// Convert CPU cycles to milliseconds
+    #[inline(always)]
+    pub const fn cycles_to_ms(cycles: u32) -> u32 {
+        cycles / (CPU_FREQ_MHZ * 1000)
+    }
+
+    // === USB PHY Timing (from RM 66.5.1) ===
+
+    /// PLL lock timeout (10ms max per RM 14.5.3)
+    pub const PLL_LOCK_TIMEOUT_US: u32 = 10_000;
+
+    /// PHY reset hold time (minimum 1μs per RM 66.5.1)
+    pub const PHY_RESET_HOLD_TIME_US: u32 = 10;
+
+    /// PHY power-up stabilization time (1ms per RM 66.5.1)
+    pub const PHY_POWER_STABILIZATION_US: u32 = 1_000;
+
+    /// Clock stabilization time after PLL lock (100μs per RM 14.5.3)
+    pub const CLOCK_STABILIZATION_US: u32 = 100;
+
+    /// USB PHY calibration timeout (5ms max per RM 66.5.1.5)
+    pub const PHY_CALIBRATION_TIMEOUT_US: u32 = 5_000;
+
+    // === EHCI Controller Timing ===
+
+    /// HC reset timeout (250ms per EHCI spec 1.0)
+    pub const HC_RESET_TIMEOUT_US: u32 = 250_000;
+
+    /// Port reset timeout (50ms per USB 2.0 spec)
+    pub const PORT_RESET_TIMEOUT_US: u32 = 50_000;
+
+    /// Port reset assertion time (20ms minimum per USB 2.0 spec 7.1.7.5)
+    pub const PORT_RESET_HOLD_MS: u32 = 20;
+
+    /// Schedule enable/disable timeout (~2ms)
+    pub const SCHEDULE_TIMEOUT_US: u32 = 2_000;
+
+    /// Controller halt timeout (16 microframes = ~2ms)
+    pub const HALT_TIMEOUT_US: u32 = 2_000;
+
+    // === VBUS Power Timing ===
+
+    /// VBUS power good delay (10ms per USB spec)
+    pub const POWER_GOOD_DELAY_US: u32 = 10_000;
+
+    /// Minimum time between overcurrent recovery attempts (1 second)
+    pub const OVERCURRENT_RECOVERY_DELAY_MS: u32 = 1000;
+
+    // === USB Protocol Timing ===
+
+    /// Device response timeout for SET_ADDRESS (100ms per USB 2.0 spec)
+    pub const DEVICE_SET_ADDRESS_TIMEOUT_MS: u32 = 100;
+
+    /// Hub power-on delay (100ms minimum per USB 2.0 spec 11.11.1.1)
+    pub const HUB_POWER_ON_DELAY_MS: u32 = 100;
+}
+
+/// Re-export CPU_FREQ_MHZ at crate root for backward compatibility
+pub use timing::CPU_FREQ_MHZ;
 
 pub mod dma;
 pub mod ehci;

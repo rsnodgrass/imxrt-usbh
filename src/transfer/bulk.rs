@@ -13,8 +13,7 @@ fn get_current_tick_count() -> u32 {
 }
 
 fn ticks_to_ms(ticks: u32) -> u32 {
-    const CPU_FREQ_MHZ: u32 = 600;
-    ticks / (CPU_FREQ_MHZ * 1000)
+    crate::timing::cycles_to_ms(ticks)
 }
 
 /// Bulk transfer states

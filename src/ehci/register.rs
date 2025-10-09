@@ -54,6 +54,12 @@ impl Register<u32> {
     }
 
     /// Read-modify-write operation with full memory barriers
+    ///
+    /// Uses strict barrier ordering for ARM Cortex-M7 weakly-ordered memory:
+    /// - DMB before read: ensures prior operations complete
+    /// - DMB after read: ensures read completes before using value
+    /// - DMB before write: ensures computation completes before write
+    /// - DSB after write: ensures write completes before continuing
     #[inline(always)]
     pub fn modify<F>(&self, f: F)
     where
@@ -62,7 +68,9 @@ impl Register<u32> {
         unsafe {
             cortex_m::asm::dmb();
             let current = read_volatile(self.value.get());
+            cortex_m::asm::dmb(); // ensure read completes before using value
             let new_value = f(current);
+            cortex_m::asm::dmb(); // ensure computation completes before write
             write_volatile(self.value.get(), new_value);
             cortex_m::asm::dsb();
         }
@@ -96,11 +104,9 @@ pub struct RegisterTimeout {
 impl RegisterTimeout {
     /// Create new timeout with duration in microseconds
     pub fn new_us(timeout_us: u32) -> Self {
-        // Use shared CPU frequency constant
-        let cycles_per_us = crate::CPU_FREQ_MHZ;
         Self {
             start_cycles: cortex_m::peripheral::DWT::cycle_count(),
-            timeout_cycles: timeout_us * cycles_per_us,
+            timeout_cycles: crate::timing::us_to_cycles(timeout_us),
         }
     }
 
