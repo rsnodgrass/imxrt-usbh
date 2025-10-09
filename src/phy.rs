@@ -119,12 +119,14 @@ impl UsbPhy {
         let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
 
         // Assert soft reset (RM 66.5.1.2 step 1)
+        // Safety: ctrl_reg is valid USBPHY_CTRL register address, set_bits_at uses atomic operations
         unsafe { set_bits_at(ctrl_reg, USBPHY_CTRL_SFTRST) };
 
         // Hold reset for minimum time (RM timing requirement)
         self.delay_us(timing::PHY_RESET_HOLD_TIME_US);
 
         // Deassert soft reset and clock gate
+        // Safety: ctrl_reg is valid USBPHY_CTRL register address, clear_bits_at uses atomic operations
         unsafe { clear_bits_at(ctrl_reg, USBPHY_CTRL_SFTRST | USBPHY_CTRL_CLKGATE) };
 
         // Wait for PHY to stabilize
@@ -137,6 +139,7 @@ impl UsbPhy {
     fn init_usb_pll(&mut self) -> Result<()> {
         // CRITICAL: Enable USB peripheral clock before accessing PLL registers
         // Per i.MX RT1060 RM Ch. 13.1.1: Accessing gated peripherals causes bus faults
+        // Safety: Getting singleton instance of CCM peripheral, safe as no concurrent access
         let ccm = unsafe { ral::ccm::CCM::instance() };
 
         // Enable USB clock gate (CG0 = 0b11 for always-on)
@@ -151,6 +154,7 @@ impl UsbPhy {
         }
 
         // CRITICAL: Use correct PLL for this PHY instance
+        // Safety: Getting singleton instance of CCM_ANALOG peripheral, safe as no concurrent access
         let analog = unsafe { ral::ccm_analog::CCM_ANALOG::instance() };
         let is_usb1 = self.phy_base == USBPHY1_BASE;
 
@@ -283,6 +287,7 @@ impl UsbPhy {
     /// This catches bugs where we write to the wrong PLL register.
     /// We check the other PLL's divider to ensure it wasn't recently configured.
     fn verify_other_pll_unchanged(&self, is_usb1: bool) -> Result<()> {
+        // Safety: Getting singleton instance of CCM_ANALOG peripheral, safe as no concurrent access
         let analog = unsafe { ral::ccm_analog::CCM_ANALOG::instance() };
 
         // Read the OTHER PLL's divider
@@ -308,6 +313,7 @@ impl UsbPhy {
         let pwr_reg = (self.phy_base + 0x00) as *mut u32;
 
         // Clear power-down bits
+        // Safety: pwr_reg is valid USBPHY_PWD register address, clear_bits_at uses atomic operations
         unsafe { clear_bits_at(pwr_reg, 1 << 10) }; // PWDN bit
 
         // Wait for power stabilization with verification
@@ -324,6 +330,7 @@ impl UsbPhy {
         let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
 
         // Enable host mode features
+        // Safety: ctrl_reg is valid USBPHY_CTRL register address, set_bits_at uses atomic operations
         unsafe {
             set_bits_at(
                 ctrl_reg,
@@ -339,12 +346,14 @@ impl UsbPhy {
         let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
 
         // Start calibration sequence (RM 66.5.1.5)
+        // Safety: ctrl_reg is valid USBPHY_CTRL register address, set_bits_at uses atomic operations
         unsafe { set_bits_at(ctrl_reg, 1 << 16) }; // Start calibration
 
         // Wait for calibration completion
         let timeout = RegisterTimeout::new_us(timing::PHY_CALIBRATION_TIMEOUT_US);
         timeout
             .wait_for(|| {
+                // Safety: ctrl_reg is valid USBPHY_CTRL register address for polling calibration status
                 let ctrl = unsafe { read_register_at(ctrl_reg) };
                 (ctrl & (1 << 17)) != 0 // Calibration done
             })
@@ -357,6 +366,7 @@ impl UsbPhy {
     /// Enable host disconnect detection with debouncing
     fn enable_host_disconnect_detect(&mut self) {
         let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *mut u32;
+        // Safety: ctrl_reg is valid USBPHY_CTRL register address, set_bits_at uses atomic operations
         unsafe { set_bits_at(ctrl_reg, USBPHY_CTRL_ENHOSTDISCONDETECT) };
     }
 
@@ -365,6 +375,7 @@ impl UsbPhy {
         // Read CTRL register to verify PHY is accessible
         // (No test register exists in USBPHY per RM 66.6)
         let ctrl_reg = (self.phy_base + USBPHY_CTRL_OFFSET) as *const u32;
+        // Safety: ctrl_reg is valid USBPHY_CTRL register address, read verifies PHY is accessible
         let _ctrl = unsafe { read_register_at(ctrl_reg) };
         // If read succeeds without bus fault, PHY is responding
 
@@ -386,6 +397,7 @@ impl UsbPhy {
     /// Check PHY health and attempt recovery if needed
     pub fn health_check_and_recovery(&mut self) -> Result<()> {
         // Check PLL lock status for this PHY instance
+        // Safety: Getting singleton instance of CCM_ANALOG peripheral, safe as no concurrent access
         let analog = unsafe { ral::ccm_analog::CCM_ANALOG::instance() };
         let is_usb1 = self.phy_base == USBPHY1_BASE;
 
