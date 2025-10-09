@@ -44,22 +44,39 @@ impl DeviceClass {
 }
 
 /// USB device descriptor (first 18 bytes)
+///
+/// Standard USB 2.0 device descriptor containing device identification
+/// and configuration information. See USB 2.0 Specification Section 9.6.1.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct DeviceDescriptor {
+    /// Size of this descriptor in bytes (always 18)
     pub b_length: u8,
+    /// Descriptor type (always 0x01 for DEVICE)
     pub b_descriptor_type: u8,
+    /// USB specification release number in BCD (e.g., 0x0200 for USB 2.0)
     pub bcd_usb: u16,
+    /// Class code (assigned by USB-IF). 0x00 means class specified in interface descriptors
     pub b_device_class: u8,
+    /// Subclass code (assigned by USB-IF)
     pub b_device_sub_class: u8,
+    /// Protocol code (assigned by USB-IF)
     pub b_device_protocol: u8,
+    /// Maximum packet size for endpoint 0 (valid values: 8, 16, 32, 64)
     pub b_max_packet_size0: u8,
+    /// Vendor ID (assigned by USB-IF)
     pub id_vendor: u16,
+    /// Product ID (assigned by manufacturer)
     pub id_product: u16,
+    /// Device release number in BCD
     pub bcd_device: u16,
+    /// Index of manufacturer string descriptor (0 if no string)
     pub i_manufacturer: u8,
+    /// Index of product string descriptor (0 if no string)
     pub i_product: u8,
+    /// Index of serial number string descriptor (0 if no string)
     pub i_serial_number: u8,
+    /// Number of possible configurations
     pub b_num_configurations: u8,
 }
 
@@ -95,31 +112,54 @@ impl DeviceDescriptor {
 }
 
 /// Configuration descriptor header
+///
+/// Describes one possible device configuration. A device may have multiple
+/// configurations but only one is active at a time. See USB 2.0 Spec Section 9.6.3.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct ConfigurationDescriptor {
+    /// Size of this descriptor in bytes (always 9)
     pub b_length: u8,
+    /// Descriptor type (always 0x02 for CONFIGURATION)
     pub b_descriptor_type: u8,
+    /// Total length of data returned for this configuration (includes all interface/endpoint descriptors)
     pub w_total_length: u16,
+    /// Number of interfaces supported by this configuration
     pub b_num_interfaces: u8,
+    /// Value to use as argument to SET_CONFIGURATION to select this configuration
     pub b_configuration_value: u8,
+    /// Index of string descriptor describing this configuration (0 if no string)
     pub i_configuration: u8,
+    /// Configuration characteristics (bit 7: reserved=1, bit 6: self-powered, bit 5: remote wakeup)
     pub bm_attributes: u8,
+    /// Maximum power consumption in 2mA units (e.g., 50 = 100mA)
     pub b_max_power: u8,
 }
 
 /// Interface descriptor
+///
+/// Describes a specific interface within a configuration. Interfaces group
+/// related endpoints for a particular function. See USB 2.0 Spec Section 9.6.5.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct InterfaceDescriptor {
+    /// Size of this descriptor in bytes (always 9)
     pub b_length: u8,
+    /// Descriptor type (always 0x04 for INTERFACE)
     pub b_descriptor_type: u8,
+    /// Number identifying this interface (zero-based)
     pub b_interface_number: u8,
+    /// Value used to select alternate setting for this interface
     pub b_alternate_setting: u8,
+    /// Number of endpoints used by this interface (excluding endpoint 0)
     pub b_num_endpoints: u8,
+    /// Class code (assigned by USB-IF). 0xFF = vendor-specific
     pub b_interface_class: u8,
+    /// Subclass code (assigned by USB-IF)
     pub b_interface_sub_class: u8,
+    /// Protocol code (assigned by USB-IF)
     pub b_interface_protocol: u8,
+    /// Index of string descriptor describing this interface (0 if no string)
     pub i_interface: u8,
 }
 
