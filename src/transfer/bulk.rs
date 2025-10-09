@@ -32,6 +32,23 @@ pub enum BulkState {
     Stalled = 4,
 }
 
+impl From<u8> for BulkState {
+    fn from(val: u8) -> Self {
+        match val {
+            0 => Self::Idle,
+            1 => Self::Active,
+            2 => Self::Complete,
+            3 => Self::Failed,
+            4 => Self::Stalled,
+            _ => {
+                #[cfg(feature = "defmt")]
+                defmt::error!("Invalid BulkState value: {}, defaulting to Failed", val);
+                Self::Failed
+            }
+        }
+    }
+}
+
 /// Bulk transfer context for a single endpoint
 pub struct BulkTransfer {
     /// Current state
@@ -99,14 +116,7 @@ impl BulkTransfer {
 
     /// Get current state
     pub fn state(&self) -> BulkState {
-        match self.state.load(Ordering::Acquire) {
-            0 => BulkState::Idle,
-            1 => BulkState::Active,
-            2 => BulkState::Complete,
-            3 => BulkState::Failed,
-            4 => BulkState::Stalled,
-            _ => BulkState::Failed,
-        }
+        self.state.load(Ordering::Acquire).into()
     }
 
     /// Transition to new state

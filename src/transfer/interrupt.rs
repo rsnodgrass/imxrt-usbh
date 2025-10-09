@@ -27,6 +27,24 @@ pub enum InterruptState {
     Stalled = 5,
 }
 
+impl From<u8> for InterruptState {
+    fn from(val: u8) -> Self {
+        match val {
+            0 => Self::Idle,
+            1 => Self::Scheduled,
+            2 => Self::Active,
+            3 => Self::Complete,
+            4 => Self::Failed,
+            5 => Self::Stalled,
+            _ => {
+                #[cfg(feature = "defmt")]
+                defmt::error!("Invalid InterruptState value: {}, defaulting to Failed", val);
+                Self::Failed
+            }
+        }
+    }
+}
+
 /// Interrupt transfer context for periodic endpoint
 pub struct InterruptTransfer {
     /// Current state
@@ -96,15 +114,7 @@ impl InterruptTransfer {
 
     /// Get current state
     pub fn state(&self) -> InterruptState {
-        match self.state.load(Ordering::Acquire) {
-            0 => InterruptState::Idle,
-            1 => InterruptState::Scheduled,
-            2 => InterruptState::Active,
-            3 => InterruptState::Complete,
-            4 => InterruptState::Failed,
-            5 => InterruptState::Stalled,
-            _ => InterruptState::Failed,
-        }
+        self.state.load(Ordering::Acquire).into()
     }
 
     /// Transition to new state
