@@ -67,13 +67,15 @@ impl UsbMemoryPool {
     ///
     /// # Errors
     ///
-    /// Returns `UsbError::InvalidState` if DMA region not initialized (critical for cache coherency).
+    /// Returns `UsbError::DmaNotInitialized` if DMA region not initialized (critical for cache coherency).
+    /// You MUST call `unsafe { dma::init_dma_region()? }` at startup before any buffer allocations.
+    ///
     /// Returns `UsbError::InvalidParameter` if size exceeds 512 bytes.
     /// Returns `UsbError::NoResources` if all buffer slots are allocated.
     pub fn alloc_buffer(&mut self, size: usize) -> Result<super::DmaBuffer> {
         // Check DMA initialization in ALL builds (not just debug)
         if !super::is_dma_initialized() {
-            return Err(UsbError::InvalidState);
+            return Err(UsbError::DmaNotInitialized);
         }
 
         // Fixed 512-byte buffers, reject requests that are too large

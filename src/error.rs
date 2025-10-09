@@ -40,6 +40,8 @@ pub enum UsbError {
     InvalidParameter,
     /// Invalid state for operation
     InvalidState,
+    /// DMA region not initialized - must call init_dma_region() first
+    DmaNotInitialized,
     /// Unsupported operation
     Unsupported,
 
@@ -64,6 +66,7 @@ impl fmt::Display for UsbError {
             Self::NoResources => write!(f, "No resources"),
             Self::InvalidParameter => write!(f, "Invalid parameter"),
             Self::InvalidState => write!(f, "Invalid state"),
+            Self::DmaNotInitialized => write!(f, "DMA not initialized - call init_dma_region() first"),
             Self::Unsupported => write!(f, "Unsupported"),
             Self::InvalidDescriptor => write!(f, "Invalid descriptor"),
             Self::BufferOverflow => write!(f, "Buffer overflow"),
@@ -139,6 +142,8 @@ impl UsbError {
                 "Invalid parameter. Check endpoint addresses and buffer sizes.",
             Self::InvalidState =>
                 "Invalid USB state. Device may need to be re-enumerated.",
+            Self::DmaNotInitialized =>
+                "DMA region not initialized. You MUST call unsafe { dma::init_dma_region()? } at startup before allocating any buffers. This configures the MPU for cache coherency.",
             Self::Unsupported =>
                 "Unsupported operation. Feature not implemented or device incompatible.",
             Self::InvalidDescriptor =>
@@ -160,7 +165,7 @@ impl UsbError {
                 ErrorCategory::Transfer
             }
             Self::NoResources => ErrorCategory::Resource,
-            Self::InvalidParameter | Self::InvalidState | Self::Unsupported => {
+            Self::InvalidParameter | Self::InvalidState | Self::DmaNotInitialized | Self::Unsupported => {
                 ErrorCategory::Programming
             }
             Self::InvalidDescriptor | Self::BufferOverflow => ErrorCategory::Data,
@@ -230,6 +235,12 @@ impl UsbError {
                 "Re-enumerate the device",
                 "Check device state before operations",
                 "Verify initialization sequence was completed",
+            ],
+            Self::DmaNotInitialized => &[
+                "Add at startup: unsafe { imxrt_usbh::dma::init_dma_region()? }",
+                "This MUST be called before any alloc_buffer() calls",
+                "See README.md for correct initialization sequence",
+                "Check examples/02_device_enumeration.rs for reference",
             ],
             Self::Unsupported => &[
                 "Check if feature is implemented in this library version",

@@ -185,7 +185,7 @@ impl<const N_SMALL: usize, const N_LARGE: usize> DataBufferPool<N_SMALL, N_LARGE
         if !crate::dma::is_dma_initialized() {
             #[cfg(feature = "defmt")]
             defmt::error!("DMA buffer allocation attempted before init_dma_region() called");
-            return Err(UsbError::InvalidState);
+            return Err(UsbError::DmaNotInitialized);
         }
 
         if size <= 64 {

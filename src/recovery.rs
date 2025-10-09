@@ -100,6 +100,7 @@ impl RecoveryCoordinator {
             // Fatal errors - cannot recover
             UsbError::InvalidParameter
             | UsbError::InvalidState
+            | UsbError::DmaNotInitialized
             | UsbError::InvalidDescriptor
             | UsbError::Unsupported
             | UsbError::AlreadyInitialized => RecoveryStrategy::Fatal,
@@ -500,8 +501,9 @@ impl RecoveryStats {
             UsbError::BufferOverflow => 10,
             UsbError::InvalidParameter => 12,
             UsbError::InvalidState => 13,
-            UsbError::NoResources => 14,
-            UsbError::PortError => 15,
+            UsbError::DmaNotInitialized => 14,
+            UsbError::NoResources => 15,
+            UsbError::PortError => 16,
             UsbError::Unsupported => 17,
             UsbError::Nak => 18,
             UsbError::InvalidDescriptor => 19,
