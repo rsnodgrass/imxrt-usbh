@@ -48,6 +48,12 @@ use imxrt_usbh::{
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
+/// defmt timestamp function (required by library's defmt usage)
+#[no_mangle]
+fn _defmt_timestamp() -> u64 {
+    0
+}
+
 /// i.MX RT1062 Hardware Register Base Addresses
 ///
 /// These addresses are from the i.MX RT1062 reference manual and are
