@@ -43,10 +43,13 @@ where
     pub unsafe fn new(base_addr: usize) -> Result<Self> {
         // Read capability registers to validate hardware configuration
         cortex_m::asm::dmb();
+        // Safety: Reading CAPLENGTH+HCIVERSION register at base address with barriers
         let _cap_base = unsafe { core::ptr::read_volatile((base_addr + 0x00) as *const u32) };
         cortex_m::asm::dmb();
+        // Safety: Reading HCSPARAMS capability register at offset 0x04 with barriers
         let hcsparams = unsafe { core::ptr::read_volatile((base_addr + 0x04) as *const u32) };
         cortex_m::asm::dmb();
+        // Safety: Reading HCCPARAMS capability register at offset 0x08 with barriers
         let hccparams = unsafe { core::ptr::read_volatile((base_addr + 0x08) as *const u32) };
         cortex_m::asm::dmb();
 
@@ -74,10 +77,12 @@ where
         // Reset controller (RM 66.6.10 USBCMD[1])
         let usbcmd_ptr = (op_base + 0x00) as *mut u32;
         cortex_m::asm::dmb();
+        // Safety: Reading USBCMD register at operational base with barriers
         let mut usbcmd = unsafe { core::ptr::read_volatile(usbcmd_ptr) };
         cortex_m::asm::dmb();
         usbcmd |= 0x02; // HC Reset
         cortex_m::asm::dmb();
+        // Safety: Writing HC Reset bit to USBCMD register with barriers
         unsafe { core::ptr::write_volatile(usbcmd_ptr, usbcmd) };
         cortex_m::asm::dsb();
 
@@ -85,6 +90,7 @@ where
         let timeout = RegisterTimeout::new_us(10_000);
         timeout.wait_for(|| {
             cortex_m::asm::dmb();
+            // Safety: Polling USBCMD register for reset completion with barriers
             let cmd = unsafe { core::ptr::read_volatile(usbcmd_ptr) };
             cortex_m::asm::dmb();
             (cmd & 0x02) == 0 // Reset bit clears when complete
@@ -111,10 +117,12 @@ where
         let usbcmd_ptr = (op_base + 0x00) as *mut u32;
 
         cortex_m::asm::dmb();
+        // Safety: Reading USBCMD register at operational base with barriers
         let mut usbcmd = unsafe { core::ptr::read_volatile(usbcmd_ptr) };
         cortex_m::asm::dmb();
         usbcmd |= 0x01; // Run/Stop bit
         cortex_m::asm::dmb();
+        // Safety: Writing Run/Stop bit to USBCMD register with barriers
         unsafe { core::ptr::write_volatile(usbcmd_ptr, usbcmd) };
         cortex_m::asm::dsb();
 
@@ -159,6 +167,7 @@ where
         let op_base = self.operational_base();
         let portsc_ptr = (op_base + 0x44 + (port * 4)) as *const u32;
         cortex_m::asm::dmb();
+        // Safety: Reading PORTSC register at validated port offset with barriers
         let portsc_val = unsafe { core::ptr::read_volatile(portsc_ptr) };
         cortex_m::asm::dmb();
         Ok(PortSc::from_bits_truncate(portsc_val))
@@ -167,6 +176,7 @@ where
     /// Get operational registers base address
     fn operational_base(&self) -> usize {
         cortex_m::asm::dmb();
+        // Safety: Reading CAPLENGTH byte from capability registers with barriers
         let cap_base = unsafe { core::ptr::read_volatile(self.base_addr as *const u32) };
         cortex_m::asm::dmb();
         let cap_length = (cap_base & 0xFF) as usize;
@@ -194,6 +204,7 @@ where
         let op_base = self.operational_base();
         let usbsts_ptr = (op_base + 0x04) as *const u32;
         cortex_m::asm::dmb();
+        // Safety: Reading USBSTS register at offset 0x04 from operational base with barriers
         let status_val = unsafe { core::ptr::read_volatile(usbsts_ptr) };
         cortex_m::asm::dmb();
         UsbSts::from_bits_truncate(status_val)
@@ -237,6 +248,7 @@ where
 
     /// Build the controller
     pub unsafe fn build(self) -> Result<EhciController<N_PORTS, Uninitialized>> {
+        // Safety: Caller must ensure exclusive access to EHCI controller at base_addr
         unsafe { EhciController::new(self.base_addr) }
     }
 }
