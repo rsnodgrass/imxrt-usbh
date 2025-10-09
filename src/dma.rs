@@ -83,6 +83,36 @@ impl CacheAlignedBuffer {
     }
 }
 
+/// Static DMA memory region for EHCI USB host controller
+///
+/// This structure provides pre-allocated, properly-aligned memory for all EHCI
+/// data structures and transfer buffers. It is placed in OCRAM via the linker
+/// to ensure DMA-accessible memory.
+///
+/// # Memory Layout
+///
+/// - **QH Pool** (4096 bytes): 64 Queue Heads @ 64 bytes each (EHCI spec alignment)
+/// - **qTD Pool** (8192 bytes): 256 Queue Transfer Descriptors @ 32 bytes each
+/// - **Data Buffers** (16384 bytes): 32 transfer buffers @ 512 bytes each (cache-aligned)
+///
+/// Total size: ~28 KB, aligned to 4096-byte page boundary
+///
+/// # Linker Placement
+///
+/// This structure uses `#[link_section = ".ocram"]` to ensure placement in
+/// on-chip RAM accessible by the USB DMA engine. The linker script must
+/// define the `.ocram` section in DMA-accessible memory.
+///
+/// # Safety
+///
+/// - All sub-structures are properly aligned per EHCI 1.0 specification
+/// - Cache-line alignment (32 bytes) prevents false sharing
+/// - Page alignment (4096 bytes) enables efficient MPU configuration
+///
+/// # See Also
+///
+/// - EHCI 1.0 Specification, Section 3 (Data Structures)
+/// - i.MX RT1060 Reference Manual, Chapter 2 (Memory Map)
 #[repr(C, align(4096))]
 pub struct DmaRegion {
     /// Queue Head pool (aligned to 64 bytes per EHCI spec)

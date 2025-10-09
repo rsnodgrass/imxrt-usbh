@@ -291,10 +291,12 @@ impl RegisterTimeout {
     /// # use imxrt_usbh::ehci::RegisterTimeout;
     /// # let usbcmd_ptr = 0x402E_0140 as *const u32;
     /// // Wait for HC Reset bit to clear
-    /// RegisterTimeout::new_us(10_000).wait_for_bit_clear(usbcmd_ptr, 0x02)?;
+    /// unsafe {
+    ///     RegisterTimeout::new_us(10_000).wait_for_bit_clear(usbcmd_ptr, 0x02)?;
+    /// }
     /// # Ok::<(), imxrt_usbh::UsbError>(())
     /// ```
-    pub fn wait_for_bit_clear(
+    pub unsafe fn wait_for_bit_clear(
         &self,
         reg: *const u32,
         mask: u32,
@@ -319,10 +321,12 @@ impl RegisterTimeout {
     /// # use imxrt_usbh::ehci::RegisterTimeout;
     /// # let usbsts_ptr = 0x402E_0144 as *const u32;
     /// // Wait for HC Halted bit to be set
-    /// RegisterTimeout::new_us(2_000).wait_for_bit_set(usbsts_ptr, 0x1000)?;
+    /// unsafe {
+    ///     RegisterTimeout::new_us(2_000).wait_for_bit_set(usbsts_ptr, 0x1000)?;
+    /// }
     /// # Ok::<(), imxrt_usbh::UsbError>(())
     /// ```
-    pub fn wait_for_bit_set(
+    pub unsafe fn wait_for_bit_set(
         &self,
         reg: *const u32,
         mask: u32,
@@ -334,4 +338,125 @@ impl RegisterTimeout {
             (val & mask) != 0
         })
     }
+}
+
+// === RAL Wrapper Macros with ARM Cortex-M7 Memory Barriers ===
+
+/// Safe register read with ARM Cortex-M7 memory barriers
+///
+/// Wraps `imxrt_ral::read_reg!` with proper memory barriers for weakly-ordered
+/// ARM Cortex-M7 memory. Ensures hardware register reads are ordered correctly
+/// relative to other memory operations.
+///
+/// # Memory Ordering
+///
+/// - **DMB before read**: Ensures all prior memory operations complete before reading
+/// - **DMB after read**: Ensures register read completes before using the value
+///
+/// # Why This Is Needed
+///
+/// ARM Cortex-M7 has weakly-ordered memory. Without barriers, the CPU or hardware
+/// can reorder register reads relative to other operations, causing:
+/// - Reading stale values
+/// - Race conditions with DMA
+/// - Incorrect hardware state observations
+///
+/// # Example
+///
+/// ```no_run
+/// # use imxrt_ral as ral;
+/// let analog = unsafe { ral::ccm_analog::CCM_ANALOG::instance() };
+/// let pll_value = safe_read_reg!(ral::ccm_analog, analog, PLL_USB1);
+/// ```
+///
+/// # See Also
+///
+/// - ARM Cortex-M7 Technical Reference Manual, Section 8.3 (Memory Ordering)
+/// - i.MX RT1060 Reference Manual, Chapter 2 (Memory Map)
+#[macro_export]
+macro_rules! safe_read_reg {
+    ($peripheral:path, $instance:expr, $register:ident $(, $field:ident)* ) => {{
+        cortex_m::asm::dmb(); // Data Memory Barrier before read
+        let val = imxrt_ral::read_reg!($peripheral, $instance, $register $(, $field)*);
+        cortex_m::asm::dmb(); // Data Memory Barrier after read
+        val
+    }};
+}
+
+/// Safe register modify with ARM Cortex-M7 memory barriers
+///
+/// Wraps `imxrt_ral::modify_reg!` with proper memory barriers for weakly-ordered
+/// ARM Cortex-M7 memory. Ensures read-modify-write operations are atomic and
+/// ordered correctly relative to other memory operations.
+///
+/// # Memory Ordering
+///
+/// - **DMB before**: Ensures all prior operations complete before read-modify-write
+/// - **DSB after**: Ensures write completes before continuing (stronger than DMB)
+///
+/// # Why DSB After Write
+///
+/// DSB (Data Synchronization Barrier) is stronger than DMB. It ensures the register
+/// write has fully completed and is visible to hardware before the next instruction
+/// executes. This prevents bugs like "works with debug prints, fails without them"
+/// where prints add implicit delays.
+///
+/// # Example
+///
+/// ```no_run
+/// # use imxrt_ral as ral;
+/// let analog = unsafe { ral::ccm_analog::CCM_ANALOG::instance() };
+/// safe_modify_reg!(ral::ccm_analog, analog, PLL_USB1,
+///     DIV_SELECT: 20,
+///     ENABLE: 1
+/// );
+/// ```
+///
+/// # See Also
+///
+/// - ARM Cortex-M7 Technical Reference Manual, Section 8.3 (Memory Ordering)
+/// - ARM Architecture Reference Manual, Section B2.2.2 (Memory Barriers)
+#[macro_export]
+macro_rules! safe_modify_reg {
+    ($peripheral:path, $instance:expr, $register:ident, $($field:ident: $value:expr),+ $(,)? ) => {{
+        cortex_m::asm::dmb(); // Data Memory Barrier before modify
+        imxrt_ral::modify_reg!($peripheral, $instance, $register, $($field: $value),+);
+        cortex_m::asm::dsb(); // Data Synchronization Barrier ensures write completes
+    }};
+}
+
+/// Safe register write with ARM Cortex-M7 memory barriers
+///
+/// Wraps `imxrt_ral::write_reg!` with proper memory barriers for weakly-ordered
+/// ARM Cortex-M7 memory. Ensures register writes are ordered correctly and
+/// complete before continuing execution.
+///
+/// # Memory Ordering
+///
+/// - **DMB before write**: Ensures all prior operations complete before writing
+/// - **DSB after write**: Ensures write completes before continuing
+///
+/// # When to Use
+///
+/// Use this for control registers where you need to ensure the write takes effect
+/// before the next operation (e.g., starting a DMA transfer, enabling interrupts).
+///
+/// # Example
+///
+/// ```no_run
+/// # use imxrt_ral as ral;
+/// let ccm = unsafe { ral::ccm::CCM::instance() };
+/// safe_write_reg!(ral::ccm, ccm, CCGR6, 0xFFFFFFFF); // Enable all clock gates
+/// ```
+///
+/// # See Also
+///
+/// - ARM Cortex-M7 Technical Reference Manual, Section 8.3 (Memory Ordering)
+#[macro_export]
+macro_rules! safe_write_reg {
+    ($peripheral:path, $instance:expr, $register:ident, $value:expr) => {{
+        cortex_m::asm::dmb(); // Data Memory Barrier before write
+        imxrt_ral::write_reg!($peripheral, $instance, $register, $value);
+        cortex_m::asm::dsb(); // Data Synchronization Barrier ensures write completes
+    }};
 }

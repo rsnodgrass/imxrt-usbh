@@ -439,14 +439,25 @@ pub struct QtdHandle {
 }
 
 impl QhHandle {
+    /// Create a new Queue Head handle with index and generation counter
+    ///
+    /// The generation counter provides ABA problem protection: when a QH is freed
+    /// and reallocated, the generation increments, invalidating old handles.
     pub fn new(index: usize, generation: u32) -> Self {
         Self { index, generation }
     }
 
+    /// Get the descriptor pool index
+    ///
+    /// Returns the index into the QH pool where this descriptor is located.
     pub fn index(&self) -> usize {
         self.index
     }
 
+    /// Get the generation counter
+    ///
+    /// The generation counter increments each time a pool slot is reallocated,
+    /// preventing use-after-free bugs from stale handles.
     pub fn generation(&self) -> u32 {
         self.generation
     }
@@ -458,14 +469,25 @@ impl QhHandle {
 }
 
 impl QtdHandle {
+    /// Create a new Queue Transfer Descriptor handle with index and generation counter
+    ///
+    /// The generation counter provides ABA problem protection: when a qTD is freed
+    /// and reallocated, the generation increments, invalidating old handles.
     pub fn new(index: usize, generation: u32) -> Self {
         Self { index, generation }
     }
 
+    /// Get the descriptor pool index
+    ///
+    /// Returns the index into the qTD pool where this descriptor is located.
     pub fn index(&self) -> usize {
         self.index
     }
 
+    /// Get the generation counter
+    ///
+    /// The generation counter increments each time a pool slot is reallocated,
+    /// preventing use-after-free bugs from stale handles.
     pub fn generation(&self) -> u32 {
         self.generation
     }
