@@ -391,9 +391,8 @@ impl ControlTransfer {
                 return Err(UsbError::TransactionError);
             } else if status & (1 << 3) != 0 {
                 return Err(UsbError::TransactionError);
-            } else {
-                return Err(UsbError::TransactionError);
             }
+            return Err(UsbError::TransactionError);
         }
 
         // Retry current stage

@@ -39,25 +39,29 @@ pub mod timing {
     pub const CPU_FREQ_MHZ: u32 = 600;
 
     /// Convert microseconds to CPU cycles
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn us_to_cycles(us: u32) -> u32 {
         us * CPU_FREQ_MHZ
     }
 
     /// Convert milliseconds to CPU cycles
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn ms_to_cycles(ms: u32) -> u32 {
         ms * CPU_FREQ_MHZ * 1000
     }
 
     /// Convert CPU cycles to microseconds
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn cycles_to_us(cycles: u32) -> u32 {
         cycles / CPU_FREQ_MHZ
     }
 
     /// Convert CPU cycles to milliseconds
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn cycles_to_ms(cycles: u32) -> u32 {
         cycles / (CPU_FREQ_MHZ * 1000)
     }

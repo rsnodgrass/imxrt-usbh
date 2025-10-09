@@ -178,9 +178,8 @@ impl<'a> ControlExecutor<'a> {
                         let mut result = heapless::Vec::new();
                         result.extend_from_slice(data).ok();
                         return Ok(result);
-                    } else {
-                        return Ok(heapless::Vec::new());
                     }
+                    return Ok(heapless::Vec::new());
                 }
                 Err(e) if attempt < max_retries => {
                     // Retry on transient errors

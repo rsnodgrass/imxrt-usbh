@@ -350,9 +350,8 @@ impl InterruptTransfer {
             return Err(UsbError::TransactionError);
         } else if status & (1 << 3) != 0 {
             return Err(UsbError::TransactionError);
-        } else {
-            return Err(UsbError::TransactionError);
         }
+        return Err(UsbError::TransactionError);
     }
 
     /// Clean up resources (used when transfer is cancelled)

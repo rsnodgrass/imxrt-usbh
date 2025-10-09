@@ -52,6 +52,7 @@ pub struct ManagedDescriptor<T> {
 
 impl<T> ManagedDescriptor<T> {
     /// Create new managed descriptor
+    #[must_use]
     pub fn new(descriptor: NonNull<T>, pool_index: usize) -> Self {
         Self {
             descriptor,
@@ -443,6 +444,7 @@ impl QhHandle {
     ///
     /// The generation counter provides ABA problem protection: when a QH is freed
     /// and reallocated, the generation increments, invalidating old handles.
+    #[must_use]
     pub fn new(index: usize, generation: u32) -> Self {
         Self { index, generation }
     }
@@ -450,6 +452,7 @@ impl QhHandle {
     /// Get the descriptor pool index
     ///
     /// Returns the index into the QH pool where this descriptor is located.
+    #[must_use]
     pub fn index(&self) -> usize {
         self.index
     }
@@ -458,11 +461,13 @@ impl QhHandle {
     ///
     /// The generation counter increments each time a pool slot is reallocated,
     /// preventing use-after-free bugs from stale handles.
+    #[must_use]
     pub fn generation(&self) -> u32 {
         self.generation
     }
 
     /// Check if handle is still valid (generation matches)
+    #[must_use]
     pub fn is_valid(&self, expected_generation: u32) -> bool {
         self.generation == expected_generation
     }
@@ -473,6 +478,7 @@ impl QtdHandle {
     ///
     /// The generation counter provides ABA problem protection: when a qTD is freed
     /// and reallocated, the generation increments, invalidating old handles.
+    #[must_use]
     pub fn new(index: usize, generation: u32) -> Self {
         Self { index, generation }
     }
@@ -480,6 +486,7 @@ impl QtdHandle {
     /// Get the descriptor pool index
     ///
     /// Returns the index into the qTD pool where this descriptor is located.
+    #[must_use]
     pub fn index(&self) -> usize {
         self.index
     }
@@ -488,11 +495,13 @@ impl QtdHandle {
     ///
     /// The generation counter increments each time a pool slot is reallocated,
     /// preventing use-after-free bugs from stale handles.
+    #[must_use]
     pub fn generation(&self) -> u32 {
         self.generation
     }
 
     /// Check if handle is still valid (generation matches)
+    #[must_use]
     pub fn is_valid(&self, expected_generation: u32) -> bool {
         self.generation == expected_generation
     }
