@@ -191,7 +191,7 @@ pub mod usb_error_handling {
             UsbError::BufferOverflow => RecoveryAction::RemoveDevice,
 
             // Initialization errors - shouldn't happen during operation
-            UsbError::AlreadyInitialized => RecoveryAction::Fatal,
+            UsbError::AlreadyInitialized | UsbError::DmaNotInitialized => RecoveryAction::Fatal,
         }
     }
 

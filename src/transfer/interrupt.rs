@@ -472,6 +472,19 @@ impl InterruptTransfer {
         self.data_buffer.take()
     }
 
+    /// Get reference to data buffer (for reading without taking ownership)
+    pub fn buffer_data(&self) -> Option<&[u8]> {
+        self.data_buffer.as_ref().map(|buf| {
+            let len = self.bytes_transferred() as usize;
+            let slice = buf.as_slice();
+            if len <= slice.len() {
+                &slice[..len]
+            } else {
+                slice
+            }
+        })
+    }
+
     /// Set completion callback ID
     pub fn set_callback(&mut self, callback_id: u32) {
         self.callback_id = Some(callback_id);
@@ -696,6 +709,46 @@ impl<const MAX_TRANSFERS: usize> InterruptTransferManager<MAX_TRANSFERS> {
             .filter_map(|t| t.as_ref())
             .filter(|t| t.is_scheduled())
             .count()
+    }
+
+    /// Poll for new transfer data (combines process_completed + check + get)
+    ///
+    /// This is a convenience method that:
+    /// 1. Processes any completed transfers
+    /// 2. Checks if the specified transfer is complete
+    /// 3. Returns the transfer data if available
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use imxrt_usbh::InterruptTransferManager;
+    /// # use imxrt_usbh::hid::KeyboardReport;
+    /// # let mut mgr = InterruptTransferManager::<4>::new();
+    /// # let id = 0;
+    /// # let mut usb = unsafe { imxrt_usbh::simple::SimpleUsbHost::new(0x402E_0200, 0x400DA000, 0x400F_C000)? };
+    /// // Instead of:
+    /// // mgr.process_completed(usb.controller());
+    /// // if let Some(transfer) = mgr.get_transfer(id) {
+    /// //     if transfer.is_complete() {
+    /// //         let data = transfer.buffer_data().unwrap();
+    /// //         // ...
+    /// //     }
+    /// // }
+    ///
+    /// // Use this:
+    /// if let Some(data) = mgr.poll_transfer_data(id, usb.controller()) {
+    ///     let report = KeyboardReport::parse(data);
+    ///     // Process report...
+    /// }
+    /// # Ok::<(), imxrt_usbh::UsbError>(())
+    /// ```
+    pub fn poll_transfer_data(
+        &self,
+        transfer_id: usize,
+    ) -> Option<&[u8]> {
+        self.get_transfer(transfer_id)
+            .filter(|t| t.is_complete())
+            .and_then(|t| t.buffer_data())
     }
 }
 

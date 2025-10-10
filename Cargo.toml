@@ -49,7 +49,7 @@ usbd-serial = "0.2"
 
 [features]
 # Default features for embedded use
-default = ["defmt"]
+default = []
 
 # Core features
 rt = ["cortex-m-rt"]  # Runtime support
@@ -137,3 +137,32 @@ all-features = true
 default-target = "thumbv7em-none-eabihf"
 targets = ["thumbv7em-none-eabihf", "thumbv7em-none-eabi"]
 rustdoc-args = ["--cfg", "docsrs"]
+
+# Advanced examples (low-level API)
+[[example]]
+name = "a01_phy_initialization"
+path = "examples/advanced/a01_phy_initialization.rs"
+
+[[example]]
+name = "a02_manual_enumeration"
+path = "examples/advanced/a02_manual_enumeration.rs"
+
+[[example]]
+name = "a03_midi_keyboard"
+path = "examples/advanced/a03_midi_keyboard.rs"
+
+[[example]]
+name = "a04_multi_device_manager"
+path = "examples/advanced/a04_multi_device_manager.rs"
+
+[[example]]
+name = "a05_mass_storage"
+path = "examples/advanced/a05_mass_storage.rs"
+
+[[example]]
+name = "a06_hid_report_protocol"
+path = "examples/advanced/a06_hid_report_protocol.rs"
+
+[[example]]
+name = "a07_qwerty_keyboard"
+path = "examples/advanced/a07_qwerty_keyboard.rs"

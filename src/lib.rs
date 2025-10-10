@@ -7,16 +7,69 @@
 //! This driver provides USB host functionality for the i.MX RT1062 microcontroller,
 //! specifically targeting Teensy 4.0 and 4.1 boards.
 //!
+//! # Two-Tier API Design
+//!
+//! This library provides two APIs to serve different needs:
+//!
+//! ## Simple API (Recommended for Most Users)
+//!
+//! High-level, batteries-included API for common use cases:
+//!
+//! ```no_run
+//! use imxrt_usbh::simple::SimpleUsbHost;
+//! use imxrt_usbh::hid::{HidDevice, KeyboardReport};
+//!
+//! // Initialize (handles PHY, DMA, controller setup)
+//! let mut usb = SimpleUsbHost::new(0x402E_0200, 0x400DA000, 0x400F_C000)?;
+//!
+//! // Wait for keyboard
+//! let device = usb.wait_for_device()?;
+//! let mut kbd = HidDevice::from_device(device)?;
+//! kbd.enable_boot_protocol(&mut usb)?;
+//!
+//! // Read keys
+//! loop {
+//!     if let Some(data) = kbd.poll_report(&mut usb)? {
+//!         let report = KeyboardReport::parse(data);
+//!         for key in report.keys_pressed() {
+//!             if let Some(ch) = key.to_ascii() {
+//!                 print!("{}", ch);
+//!             }
+//!         }
+//!     }
+//! }
+//! # Ok::<(), imxrt_usbh::UsbError>(())
+//! ```
+//!
+//! **Use the simple API when you:**
+//! - Want to get started quickly
+//! - Are working with HID devices (keyboard, mouse, gamepad)
+//! - Don't need precise timing control
+//! - Prefer synchronous, blocking operations
+//!
+//! ## Low-Level API (Advanced Users)
+//!
+//! Direct hardware control for specialized needs. See [`ehci`] module documentation.
+//!
+//! **Use the low-level API when you:**
+//! - Need isochronous transfers (audio/video streaming)
+//! - Require precise timing control
+//! - Want custom transfer scheduling
+//! - Need direct EHCI register access
+//!
 //! # Learning Path
 //!
-//! This is a low-level USB host driver. For learning and getting started:
-//!
-//! 1. **Start with examples**: Check the `examples/` directory for educational code
-//! 2. **Understand transfers**: Learn about [`transfer`] modules for different USB transfer types
-//! 3. **Advanced control**: Use [`ehci`] module for direct hardware control
+//! 1. **Start with simple examples**: `examples/01_hello_keyboard.rs`
+//! 2. **Try HID devices**: Keyboard, mouse, gamepad examples
+//! 3. **Advanced control**: See `examples/advanced/` for low-level usage
 //!
 //! # Core Components
 //!
+//! ## Simple API
+//! - [`simple`] - High-level USB host wrapper
+//! - [`hid`] - HID device support (keyboard, mouse)
+//!
+//! ## Low-Level API
 //! - [`ehci`] - EHCI USB host controller interface
 //! - [`phy`] - USB PHY management and calibration
 //! - [`transfer`] - USB transfer types (bulk, interrupt, control, isochronous)
@@ -120,6 +173,7 @@ pub mod timing {
 /// Re-export CPU_FREQ_MHZ at crate root for backward compatibility
 pub use timing::CPU_FREQ_MHZ;
 
+// Core modules (low-level API)
 pub mod dma;
 pub mod ehci;
 pub mod enumeration;
@@ -131,6 +185,10 @@ pub mod safety;
 pub mod transfer;
 pub mod vbus;
 
+// Simple API modules
+pub mod simple;
+pub mod hid;
+
 #[cfg(feature = "rtic-support")]
 pub mod rtic;
 
@@ -140,7 +198,14 @@ mod lib_test;
 #[cfg(feature = "hub")]
 pub mod hub;
 
+// Re-exports for convenience
 pub use error::{Result, UsbError};
+
+// Simple API re-exports
+pub use simple::{SimpleUsbHost, UsbDevice};
+pub use hid::{HidDevice, KeyboardReport, KeyCode, MouseReport, KeyModifiers, MouseButtons};
+
+// Low-level API re-exports
 pub use transfer::{
     BulkTransfer, BulkTransferManager, Direction, InterruptTransfer, InterruptTransferManager,
     IsochronousTransfer, IsochronousTransferManager, MicroframeTiming, TransferType,
