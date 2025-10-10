@@ -1,10 +1,8 @@
 # imxrt-usbh
 
-**Work in progress - not ready for use yet**
+**Production-ready USB host driver for i.MX RT processors (Teensy 4.x)**
 
-A production-ready USB host driver for i.MX RT processors (Teensy 4.x).
-
-**Core USB host functionality only** - device class drivers (MIDI, HID, etc.) are separate libraries that build on top of this foundation.
+A comprehensive USB host library with two-tier API design: a simple API for common use cases and a low-level API for advanced control.
 
 ## Quick Start - Get Running in 5 Minutes
 
@@ -19,9 +17,9 @@ A production-ready USB host driver for i.MX RT processors (Teensy 4.x).
    ```
 3. **Teensy Loader**: Download from [PJRC](https://www.pjrc.com/teensy/loader.html) or install CLI: `brew install teensy_loader_cli`
 
-### Build and Flash Example 01
+### Build and Flash Your First Example
 
-The simplest example - initializes USB hardware:
+The simplest example - read from a USB keyboard:
 
 ```bash
 # Clone repository
@@ -29,39 +27,104 @@ git clone https://github.com/acertain/imxrt-usbh
 cd imxrt-usbh
 
 # Build and create hex file
-cargo build --release --example 01_basic_host_init --target thumbv7em-none-eabihf
-rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/01_basic_host_init target/thumbv7em-none-eabihf/release/examples/01_basic_host_init.hex
+cargo build --release --example 01_hello_keyboard --target thumbv7em-none-eabihf
+rust-objcopy -O ihex \
+  target/thumbv7em-none-eabihf/release/examples/01_hello_keyboard \
+  target/thumbv7em-none-eabihf/release/examples/01_hello_keyboard.hex
 
 # Flash to Teensy
-teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/01_basic_host_init.hex
+teensy_loader_cli --mcu=TEENSY41 -w \
+  target/thumbv7em-none-eabihf/release/examples/01_hello_keyboard.hex
 ```
 
-**Success indicator**: LED blinks slowly. Fast blink means error.
+**What it does**: Automatically detects a USB keyboard and prints keys as you type!
 
-**What it does**: Initializes the USB PHY (Physical Layer) hardware.
+**View output**: Connect USB-to-serial adapter (TX→Pin 0, RX→Pin 1, GND→GND) and open serial monitor at 115200 baud.
 
-### Build and Flash Example 02
+---
 
-Adds the EHCI controller:
+## Two-Tier API Design
 
-```bash
-cargo build --release --example 02_device_enumeration --target thumbv7em-none-eabihf
-rust-objcopy -O ihex target/thumbv7em-none-eabihf/release/examples/02_device_enumeration target/thumbv7em-none-eabihf/release/examples/02_device_enumeration.hex
-teensy_loader_cli --mcu=TEENSY41 -w target/thumbv7em-none-eabihf/release/examples/02_device_enumeration.hex
+This library provides two APIs to serve different needs:
+
+### Simple API (Recommended for Most Users)
+
+High-level, batteries-included API for common use cases:
+
+```rust
+use imxrt_usbh::simple::SimpleUsbHost;
+use imxrt_usbh::hid::{HidDevice, KeyboardReport};
+
+// Initialize (handles PHY, DMA, controller setup)
+let mut usb = SimpleUsbHost::new(0x402E_0200, 0x400DA000, 0x400F_C000)?;
+
+// Wait for keyboard
+let device = usb.wait_for_device()?;
+let mut kbd = HidDevice::from_device(device)?;
+kbd.enable_boot_protocol(&mut usb)?;
+
+// Read keys
+// ... (see examples for full code)
 ```
 
-**Success indicator**: LED blinks slowly. Fast blink means error.
+**Use the simple API when you:**
+- Want to get started quickly
+- Are working with HID devices (keyboard, mouse, gamepad)
+- Don't need precise timing control
+- Prefer synchronous, blocking operations
 
-**What it does**: Creates the USB host controller on top of the PHY.
+### Low-Level API (Advanced Users)
 
-### Optional: View Serial Output
+Direct hardware control for specialized needs:
 
-To see detailed initialization messages:
-1. Connect USB-to-serial adapter: TX→Pin 0, RX→Pin 1, GND→GND
-2. Open serial monitor at 115200 baud
-3. Press Teensy reset button
+```rust
+use imxrt_usbh::{
+    ehci::{EhciController, TransferExecutor},
+    dma::UsbMemoryPool,
+    transfer::{BulkTransferManager, Direction},
+};
 
-**Note**: Serial output is optional - the LED indicates success/failure.
+// Manual initialization
+unsafe { imxrt_usbh::dma::init_dma_region()?; }
+let mut controller = unsafe { EhciController::<8>::new(0x402E_0200)? };
+let mut controller = unsafe { controller.initialize()?.start() };
+
+// Direct transfer control
+let mut bulk_manager = BulkTransferManager::<16>::new();
+// ... (see examples/advanced/ for full code)
+```
+
+**Use the low-level API when you:**
+- Need isochronous transfers (audio/video streaming)
+- Require precise timing control
+- Want custom transfer scheduling
+- Need direct EHCI register access
+
+---
+
+## Examples
+
+### Simple Examples (Start Here!)
+
+1. **`01_hello_keyboard.rs`** - Minimal keyboard input (best first example)
+2. **`02_device_info.rs`** - Display device information (VID/PID, endpoints)
+3. **`03_hid_mouse.rs`** - Mouse input with cursor tracking
+4. **`04_hid_gamepad.rs`** - Game controller support
+5. **`05_typing_game.rs`** - Interactive typing speed game (30 seconds, WPM tracking)
+
+### Advanced Examples
+
+See [`examples/advanced/`](examples/advanced/) for low-level API usage:
+
+1. **`01_phy_initialization.rs`** - Manual PHY setup
+2. **`02_manual_enumeration.rs`** - Manual device enumeration
+3. **`03_midi_keyboard.rs`** - MIDI device support
+4. **`04_multi_device_manager.rs`** - Multi-device management
+5. **`05_mass_storage.rs`** - USB flash drive support
+6. **`06_hid_report_protocol.rs`** - Advanced HID descriptor parsing
+7. **`07_qwerty_keyboard.rs`** - Low-level keyboard implementation
+
+For detailed documentation, see [examples/README.md](examples/README.md).
 
 ---
 
@@ -74,94 +137,121 @@ To see detailed initialization messages:
 
 ## Architecture
 
+- **Two-Tier API**: Simple wrapper + Low-level EHCI access
 - **EHCI USB Host**: Full EHCI 1.0 compliant implementation
-- **RTIC Integration**: Real-time interrupt handling with <10μs ISR latency
 - **Cache Coherent DMA**: ARM Cortex-M7 cache management for USB transfers
 - **Safety First**: `#![deny(unsafe_op_in_unsafe_fn)]` with comprehensive bounds checking
+- **RTIC Integration**: Real-time interrupt handling with <10μs ISR latency
 
 ## Design Choices
 
+- **Developer friendly**: Simple API for 90% of use cases, low-level API for the rest
 - **Real-time friendly**: Predictable timing, no locks in hot paths
 - **Stack overflow protection**: Runtime monitoring with canary patterns
 - **Hardware timing compliance**: Proper PHY initialization per i.MX RT reference manual
 - **Cache coherency**: Actual Cortex-M7 cache operations, not placeholders
 - **Error recovery**: Actionable errors with automatic retry logic
 
-## Additional Examples
-
-See the [`examples/`](examples/) directory for more advanced examples:
-- **`03_qwerty_keyboard.rs`** - USB keyboard support with real keypresses displayed
-- **`04_midi_keyboard.rs`** - MIDI device support with real-time event processing
-- **`05_multi_device_manager.rs`** - Multi-device management and string descriptors
-- **`hid_gamepad.rs`** - Game controller support with button/stick input
-- **`mass_storage.rs`** - USB flash drive support (SCSI/BOT protocol)
-
-For detailed documentation and build instructions, see [examples/README.md](examples/README.md).
-
 ## Library Usage
 
-For advanced usage and integration into your own projects:
+### Simple API (Recommended)
+
+For HID devices (keyboard, mouse, gamepad):
+
+```rust
+use imxrt_usbh::simple::SimpleUsbHost;
+use imxrt_usbh::hid::{HidDevice, KeyboardReport};
+
+// 1. Initialize USB host (handles PHY, DMA, controller)
+let mut usb = SimpleUsbHost::new(
+    0x402E_0200,  // USB2 base
+    0x400DA000,   // PHY2 base
+    0x400F_C000,  // CCM base
+)?;
+
+// 2. Wait for device
+let device = usb.wait_for_device()?;
+
+// 3. Create HID wrapper and enable boot protocol
+let mut kbd = HidDevice::from_device(device)?;
+kbd.enable_boot_protocol(&mut usb)?;
+
+// 4. Set up interrupt transfer (one line with factory helper!)
+let (interrupt_mgr, transfer_id) = kbd.create_polling_manager::<4>(&mut usb)?;
+
+// 5. Main loop - simplified with poll helper
+loop {
+    if let Some(data) = interrupt_mgr.poll_transfer_data(transfer_id) {
+        let report = KeyboardReport::parse(data);
+        // Process keys...
+    }
+}
+```
+
+### Low-Level API (Advanced)
+
+For direct hardware control:
 
 ```rust
 use imxrt_usbh::{
     enumeration::DeviceEnumerator,
-    dma::memory::UsbMemoryPool,
-    ehci::{EhciController, USB2_BASE},
+    dma::UsbMemoryPool,
+    ehci::{EhciController, TransferExecutor, Uninitialized},
     transfer::{BulkTransferManager, InterruptTransferManager, Direction},
-    dma::descriptor::DescriptorAllocator,
+    phy::UsbPhy,
 };
 
-// Initialize DMA region (CRITICAL: must be called first)
+// 1. Initialize DMA region (CRITICAL: must be called first)
 unsafe { imxrt_usbh::dma::init_dma_region()?; }
 
-// Initialize USB host controller with 8 ports
-let mut controller = unsafe { EhciController::<8>::new(USB2_BASE)? };
-let mut controller = unsafe { controller.initialize()? };
+// 2. Initialize USB PHY
+let mut phy = unsafe { UsbPhy::new(0x400DA000, 0x400F_C000) };
+phy.init_host_mode()?;
 
-// Get memory pool for buffer allocation
+// 3. Initialize EHCI controller
+let controller = unsafe { EhciController::<8, Uninitialized>::new(0x402E_0200)? };
+let controller = unsafe { controller.initialize()? };
+let mut controller = unsafe { controller.start() };
+
+// 4. Initialize memory pool and transfer executor
 let mut memory_pool = UsbMemoryPool::new();
+let mut transfer_executor = unsafe { TransferExecutor::new(0x402E_0200) };
 
-// Allocate a DMA buffer for transfers
+// 5. Enumerate device
+let mut enumerator = DeviceEnumerator::new(
+    &mut controller,
+    &mut memory_pool,
+    &mut transfer_executor,
+);
+let device = enumerator.enumerate_device()?;
+
+// 6. Create transfer managers
+let mut bulk_manager = BulkTransferManager::<16>::new();
 let data_buffer = memory_pool.alloc_buffer(512)?;
 
-// Create descriptor allocator for queue management
-let mut allocator = DescriptorAllocator::<32, 64>::new();
-
-// Create transfer manager
-let mut bulk_manager = BulkTransferManager::<16>::new();
-
-// Submit bulk IN transfer
 let transfer_id = bulk_manager.submit(
-    Direction::In,        // Read from device
-    1,                    // Device address
-    0x81,                 // Bulk IN endpoint
-    512,                  // Max packet size
-    data_buffer,          // DMA buffer
-    1000,                 // Timeout (1 second)
+    Direction::In,
+    device.address,
+    0x81,          // Bulk IN endpoint
+    512,           // Max packet size
+    data_buffer,
+    1000,          // Timeout (1 second)
 )?;
 
-// Start the transfer with descriptor allocator
-bulk_manager.start_transfer(transfer_id, &mut allocator)?;
+bulk_manager.start_transfer(transfer_id, &mut controller)?;
 
-// Setup periodic interrupt transfer (for HID devices)
-let mut interrupt_manager = InterruptTransferManager::<32>::new();
-let hid_buffer = memory_pool.alloc_buffer(64)?;
-
-let int_transfer_id = interrupt_manager.submit(
-    Direction::In,        // Read from device
-    1,                    // Device address
-    0x81,                 // Interrupt IN endpoint
-    64,                   // Max packet size
-    hid_buffer,           // DMA buffer
-    10,                   // Poll every 10ms
-    true,                 // Periodic transfer
-)?;
-
-// Device class handling happens in separate crates:
-// - imxrt-usbh-midi for MIDI keyboards
-// - imxrt-usbh-hid for mice/keyboards
-// - imxrt-usbh-msc for mass storage
+// 7. Process transfers
+loop {
+    bulk_manager.process_completed(&mut controller);
+    // ... handle completed transfers
+}
 ```
+
+## Documentation
+
+- **API Guides**: See [`docs/`](docs/) directory
+- **Examples**: See [`examples/`](examples/) and [`examples/advanced/`](examples/advanced/)
+- **Architecture Notes**: See [`CLAUDE.md`](CLAUDE.md)
 
 ## References
 
@@ -169,8 +259,9 @@ let int_transfer_id = interrupt_manager.submit(
 * [AN12042: "Using the i.MX RT L1 Cache"](https://www.nxp.com/docs/en/application-note/AN12042.pdf)
 * [EHCI Specification 1.0](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/ehci-specification-for-usb.pdf)
 * [USB 2.0 Specification](http://www.poweredusb.org/pdf/usb20.pdf)
+* [USB HID Specification 1.11](https://www.usb.org/document-library/device-class-definition-hid-111)
+* [HID Usage Tables 1.12](https://usb.org/document-library/hid-usage-tables-15)
 * [ARM Cortex-M7 Technical Reference Manual](https://developer.arm.com/documentation/ddi0489/f/introduction/documentation)
-* [cotton-usb-host architecture](https://docs.rs/cotton-usb-host/latest/cotton_usb_host/) (adaptation reference)
 
 ## License
 

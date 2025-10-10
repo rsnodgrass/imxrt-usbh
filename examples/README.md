@@ -306,13 +306,6 @@ Each device class example includes:
    - Check DMA buffer alignment (32-byte boundaries)
    - Validate transfer timing and size limits
 
-### Debug Configuration
-```toml
-[dependencies]
-imxrt-usbh = { version = "0.1", features = ["defmt"] }
-defmt-rtt = "0.4"
-```
-
 ## Performance Considerations
 
 ### Optimization Guidelines

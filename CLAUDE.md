@@ -8,6 +8,69 @@ Production-ready USB host driver for i.MX RT1062 (Teensy 4.0/4.1) with EHCI cont
 
 **Target**: ARM Cortex-M7 @ 600MHz with EHCI USB host controller. Specifically Teensy 4.1
 
+## Two-Tier API Design
+
+The library provides two complementary APIs:
+
+### Simple API (80% of users)
+
+High-level wrapper for common use cases located in `src/simple/` and `src/hid/`:
+
+**Key Components:**
+- **`SimpleUsbHost`** (`src/simple/mod.rs`): Bundles initialization (PHY, DMA, EHCI) into single call
+- **`UsbDevice`** (`src/simple/device.rs`): Device abstraction with endpoint queries and class detection
+- **`HidDevice`** (`src/hid/device.rs`): HID-specific wrapper handling SET_PROTOCOL and SET_IDLE
+- **Keyboard Support** (`src/hid/keyboard.rs`): Complete keycode-to-ASCII mapping for all standard keys
+- **Mouse Support** (`src/hid/mouse.rs`): Button states and relative movement tracking
+
+**When to use:**
+- HID devices (keyboard, mouse, gamepad)
+- Quick prototyping and learning
+- Don't need isochronous transfers or precise timing control
+- Prefer synchronous, blocking operations
+
+**Example:**
+```rust
+let mut usb = SimpleUsbHost::new(USB2_BASE, PHY2_BASE, CCM_BASE)?;
+let device = usb.wait_for_device()?;
+let mut kbd = HidDevice::from_device(device)?;
+kbd.enable_boot_protocol(&mut usb)?;
+```
+
+### Low-Level API (20% of users)
+
+Direct EHCI hardware control for advanced needs:
+
+**Key Components:**
+- **`EhciController`**: Type-state state machine (Uninitialized → Initialized → Running)
+- **`TransferExecutor`**: Direct transfer submission to EHCI schedules
+- **`DeviceEnumerator`**: Manual device enumeration with full descriptor access
+- **Transfer Managers**: BulkTransferManager, InterruptTransferManager, IsochronousTransferManager
+- **DMA Subsystem**: Manual buffer and descriptor allocation
+
+**When to use:**
+- Isochronous transfers (audio/video streaming)
+- Precise timing control
+- Custom transfer scheduling
+- Direct EHCI register access
+- Implementing custom device classes
+
+**Example:**
+```rust
+unsafe { imxrt_usbh::dma::init_dma_region()?; }
+let mut phy = unsafe { UsbPhy::new(PHY2_BASE, CCM_BASE) };
+phy.init_host_mode()?;
+let controller = unsafe { EhciController::<8, Uninitialized>::new(USB2_BASE)? };
+let controller = unsafe { controller.initialize()?.start() };
+```
+
+### Examples Organization
+
+- **`examples/01-05`**: Simple API examples (keyboard, mouse, gamepad, device info, typing game)
+- **`examples/advanced/01-07`**: Low-level API examples (PHY init, enumeration, MIDI, mass storage)
+
+**Design Philosophy**: The simple API focuses on initialization and enumeration. For data transfers (including HID polling), users work directly with transfer managers. This keeps `SimpleUsbHost` truly simple while teaching the real patterns needed for production code. See `examples/` for clean patterns showing interrupt transfer setup (~15 lines of boilerplate).
+
 ## Build Commands
 
 ### Prerequisites
@@ -78,7 +141,8 @@ cargo readobj --release --example enumerate_device -- --section-headers
 
 **Debugging Output:**
 - USB1 (micro USB) remains available for CDC serial even while USB2 runs host mode
-- Use `defmt` with RTT for zero-overhead logging without USB interference
+- Use `defmt` for zero-overhead logging without USB interference
+- The Teensy does not support RTT, so never use any RTT dependency (and especially not with defmt).
 
 ## Architecture
 
